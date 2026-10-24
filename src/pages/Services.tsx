@@ -27,6 +27,8 @@ const roles: Record<Runtime, { blurb: string; source: string }> = {
   mailpit: { blurb: "Catches outgoing mail", source: "Local SMTP server with a web inbox" },
   adminer: { blurb: "Database admin", source: "A single-file database manager" },
   phpmyadmin: { blurb: "Database admin", source: "The classic MySQL/MariaDB web interface" },
+  ngrok: { blurb: "Public tunnels", source: "Share sites on a public URL (free account needed)" },
+  cloudflared: { blurb: "Public tunnels", source: "Cloudflare quick tunnels, no account needed" },
 };
 
 const order = coreRuntimes;

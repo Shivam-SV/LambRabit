@@ -11,6 +11,7 @@ mod runtimes;
 mod services;
 mod sites;
 mod ssl;
+mod tunnels;
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -32,6 +33,7 @@ struct AppState {
     installing: Mutex<HashSet<(Runtime, String)>>,
     /// Cached result of the (slow) trust-store lookup; reset when trust changes.
     ca_trusted: Mutex<Option<bool>>,
+    tunnels: tunnels::Tunnels,
 }
 
 impl AppState {
@@ -58,6 +60,8 @@ fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<Stri
         Runtime::Mailpit => &mut settings.versions.mailpit,
         Runtime::Adminer => &mut settings.versions.adminer,
         Runtime::Phpmyadmin => &mut settings.versions.phpmyadmin,
+        Runtime::Ngrok => &mut settings.versions.ngrok,
+        Runtime::Cloudflared => &mut settings.versions.cloudflared,
     }
 }
 
@@ -72,6 +76,8 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Mailpit => &[ServiceKind::Mailpit],
         // Served by Apache through their own virtual hosts.
         Runtime::Adminer | Runtime::Phpmyadmin => &[ServiceKind::Apache],
+        // Tunnels start on demand; nothing to restart.
+        Runtime::Ngrok | Runtime::Cloudflared => &[],
     }
 }
 
@@ -400,6 +406,58 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
     restart_web_servers(&app, &state).await?;
     logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
     Ok(url)
+}
+
+/// Shares a site (by folder name) or a local port on a public URL.
+#[tauri::command]
+async fn tunnel_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    provider: tunnels::Provider,
+    site: Option<String>,
+    port: Option<u16>,
+) -> Result<tunnels::Tunnel> {
+    let (settings, layout) = state.snapshot().await;
+    let site = match site {
+        Some(name) => Some(
+            sites::served(&settings, &layout)
+                .into_iter()
+                .find(|s| s.name == name)
+                .ok_or_else(|| Error::msg(format!("No site called {name}")))?,
+        ),
+        None => None,
+    };
+    if let Some(s) = &site {
+        let kind = if s.server == config::Server::Nginx { ServiceKind::Nginx } else { ServiceKind::Apache };
+        if !state.supervisor.is_running(kind).await {
+            return Err(Error::msg(format!("Start {} first; the tunnel forwards to it.", kind.label())));
+        }
+    }
+    state.tunnels.start(&app, &settings, &layout, provider, site.as_ref(), port).await
+}
+
+#[tauri::command]
+async fn tunnel_stop(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<()> {
+    state.tunnels.stop(&app, &id).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn tunnel_list(state: State<'_, AppState>) -> Result<Vec<tunnels::Tunnel>> {
+    Ok(state.tunnels.list().await)
+}
+
+#[tauri::command]
+fn ngrok_token_saved() -> bool {
+    tunnels::ngrok_token().is_some()
+}
+
+/// Saves the Ngrok authtoken in the system keychain (None removes it).
+#[tauri::command]
+fn set_ngrok_token(app: AppHandle, token: Option<String>) -> Result<()> {
+    tunnels::set_ngrok_token(token.as_deref())?;
+    logs::system(&app, logs::Level::Info, if token.is_some() { "Ngrok authtoken saved to the keychain" } else { "Ngrok authtoken removed" });
+    Ok(())
 }
 
 #[tauri::command]
@@ -827,6 +885,7 @@ pub fn run() {
                 http: runtimes::client(),
                 installing: Mutex::new(HashSet::new()),
                 ca_trusted: Mutex::new(None),
+                tunnels: tunnels::Tunnels::default(),
             });
             app.manage(logs::LogHub::default());
             {
@@ -881,6 +940,11 @@ pub fn run() {
             set_site_server,
             php_status,
             create_project,
+            tunnel_start,
+            tunnel_stop,
+            tunnel_list,
+            ngrok_token_saved,
+            set_ngrok_token,
             trust_ca,
             open_db_client,
             runtime_catalog,
@@ -894,7 +958,10 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 let state = app.state::<AppState>();
-                tauri::async_runtime::block_on(state.supervisor.shutdown());
+                tauri::async_runtime::block_on(async {
+                    state.tunnels.stop_all().await;
+                    state.supervisor.shutdown().await;
+                });
             }
         });
 }

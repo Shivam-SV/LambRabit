@@ -4,9 +4,18 @@ export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit";
 export type WebServer = "apache" | "nginx" | "both";
 export type Server = "apache" | "nginx";
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
-export type Runtime = "apache" | "nginx" | "php" | "mariadb" | "mailpit" | "adminer" | "phpmyadmin";
+export type Runtime =
+  | "apache"
+  | "nginx"
+  | "php"
+  | "mariadb"
+  | "mailpit"
+  | "adminer"
+  | "phpmyadmin"
+  | "ngrok"
+  | "cloudflared";
 export const coreRuntimes: Runtime[] = ["apache", "nginx", "php", "mariadb"];
-export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin"];
+export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin", "ngrok", "cloudflared"];
 
 export const serviceLabels: Record<ServiceKind, string> = {
   apache: "Apache",
@@ -23,7 +32,21 @@ export const runtimeLabels: Record<Runtime, string> = {
   mailpit: "Mailpit",
   adminer: "Adminer",
   phpmyadmin: "phpMyAdmin",
+  ngrok: "Ngrok",
+  cloudflared: "Cloudflare Tunnel",
 };
+
+export type TunnelProvider = "ngrok" | "cloudflare";
+
+export interface Tunnel {
+  id: string;
+  provider: TunnelProvider;
+  site: string | null;
+  target: string;
+  url: string | null;
+  status: "starting" | "online" | "error";
+  error: string | null;
+}
 
 export interface Release {
   runtime: Runtime;
@@ -212,6 +235,12 @@ export const api = {
   setSiteServer: (name: string, server: Server | null) => invoke<void>("set_site_server", { name, server }),
   phpStatus: () => invoke<PoolStatus[]>("php_status"),
   createProject: (request: NewProject) => invoke<string>("create_project", { request }),
+  tunnelStart: (provider: TunnelProvider, site: string | null, port: number | null) =>
+    invoke<Tunnel>("tunnel_start", { provider, site, port }),
+  tunnelStop: (id: string) => invoke<void>("tunnel_stop", { id }),
+  tunnelList: () => invoke<Tunnel[]>("tunnel_list"),
+  ngrokTokenSaved: () => invoke<boolean>("ngrok_token_saved"),
+  setNgrokToken: (token: string | null) => invoke<void>("set_ngrok_token", { token }),
   trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),
   startAll: () => invoke<string[]>("start_all"),

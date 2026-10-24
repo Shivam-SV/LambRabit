@@ -13,6 +13,7 @@ import {
   ServerCog,
   Save,
   Settings2,
+  Share2,
   Stethoscope,
   Sun,
 } from "lucide-react";
@@ -363,6 +364,8 @@ export default function Settings() {
           </div>
         </SectionCard>
 
+        <SharingCard />
+
         <SectionCard
           icon={<LifeBuoy size={22} />}
           title="Troubleshooting"
@@ -456,5 +459,62 @@ function Toggle({
       </div>
       <Switch checked={checked} onChange={onChange} label={label} />
     </div>
+  );
+}
+
+/** Ngrok's authtoken lives in the system keychain, never in lampRabit's files. */
+function SharingCard() {
+  const queryClient = useQueryClient();
+  const notify = useAppStore((s) => s.notify);
+  const saved = useQuery({ queryKey: ["ngrok-token"], queryFn: api.ngrokTokenSaved });
+  const [token, setToken] = useState("");
+  const save = useMutation({
+    mutationFn: (t: string | null) => api.setNgrokToken(t),
+    onSuccess: (_, t) => {
+      setToken("");
+      queryClient.invalidateQueries({ queryKey: ["ngrok-token"] });
+      notify("info", t ? "Ngrok authtoken saved to your system keychain" : "Ngrok authtoken removed");
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+
+  return (
+    <SectionCard icon={<Share2 size={22} />} title="Sharing" subtitle="Put a site on a public URL for testing webhooks or showing a client." className="lg:col-span-2">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="space-y-3">
+          <div className="text-sm font-semibold">Ngrok authtoken</div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              className={inputClass}
+              placeholder={saved.data ? "Saved. Paste a new one to replace it" : "Paste your token"}
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              autoComplete="off"
+            />
+            <Button variant="primary" className="h-auto" onClick={() => save.mutate(token)} disabled={!token.trim() || save.isPending}>
+              Save
+            </Button>
+            {saved.data && (
+              <Button className="h-auto" onClick={() => save.mutate(null)} disabled={save.isPending}>
+                Remove
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted">
+            {saved.data ? "A token is saved in your system keychain. " : ""}
+            Ngrok needs a free account; copy the token from dashboard.ngrok.com → Your Authtoken. The free plan gives
+            one random URL at a time.
+          </p>
+        </div>
+        <div className="space-y-2 rounded-xl bg-surface-2 p-4 text-sm">
+          <div className="font-semibold">Cloudflare quick tunnels</div>
+          <p className="text-muted">
+            Need no account or token: install Cloudflare Tunnel from Services and use the share button on a site. Each
+            tunnel gets a random trycloudflare.com address that lasts until you stop it.
+          </p>
+        </div>
+      </div>
+    </SectionCard>
   );
 }

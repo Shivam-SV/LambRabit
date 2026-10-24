@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code2, Database, Feather, Mail, Server, Table2, TableProperties } from "lucide-react";
+import { Cloud, Code2, Database, Feather, Mail, Radio, Server, Table2, TableProperties } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -33,6 +33,16 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-teal-500/10 text-teal-500",
     text: "text-teal-500",
     icon: (size) => <Table2 size={size} strokeWidth={1.75} />,
+  },
+  ngrok: {
+    className: "bg-violet-500/10 text-violet-500",
+    text: "text-violet-500",
+    icon: (size) => <Radio size={size} strokeWidth={1.75} />,
+  },
+  cloudflared: {
+    className: "bg-orange-400/15 text-orange-500",
+    text: "text-orange-500",
+    icon: (size) => <Cloud size={size} strokeWidth={1.75} />,
   },
   phpmyadmin: {
     className: "bg-orange-500/10 text-orange-500",

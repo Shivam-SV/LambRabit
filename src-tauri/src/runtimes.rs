@@ -28,10 +28,13 @@ pub enum Runtime {
     Mailpit,
     Adminer,
     Phpmyadmin,
+    /// Public tunnels for sharing sites.
+    Ngrok,
+    Cloudflared,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 7] = [
+    pub const ALL: [Runtime; 9] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -39,6 +42,8 @@ impl Runtime {
         Runtime::Mailpit,
         Runtime::Adminer,
         Runtime::Phpmyadmin,
+        Runtime::Ngrok,
+        Runtime::Cloudflared,
     ];
 
     pub fn id(self) -> &'static str {
@@ -50,6 +55,8 @@ impl Runtime {
             Self::Mailpit => "mailpit",
             Self::Adminer => "adminer",
             Self::Phpmyadmin => "phpmyadmin",
+            Self::Ngrok => "ngrok",
+            Self::Cloudflared => "cloudflared",
         }
     }
 
@@ -64,6 +71,8 @@ impl Runtime {
             Self::Mailpit => PathBuf::from(exe("mailpit")),
             Self::Adminer => PathBuf::from("adminer.php"),
             Self::Phpmyadmin => PathBuf::from("index.php"),
+            Self::Ngrok => PathBuf::from(exe("ngrok")),
+            Self::Cloudflared => PathBuf::from(exe("cloudflared")),
         }
     }
 }
@@ -118,6 +127,8 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::Mailpit => mailpit_releases(client).await?,
         Runtime::Adminer => adminer_releases(client).await?,
         Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
+        Runtime::Ngrok => ngrok_releases(),
+        Runtime::Cloudflared => cloudflared_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -370,6 +381,35 @@ async fn mailpit_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     github_latest(client, Runtime::Mailpit, "axllent/mailpit", archive, |n, _| n == name).await
 }
 
+/// ngrok publishes a "v3 stable" download per platform, without a version number in the
+/// URL or a checksum, so this download relies on HTTPS.
+fn ngrok_releases() -> Vec<Release> {
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
+    let (os, ext, archive) = match std::env::consts::OS {
+        "windows" => ("windows", "zip", Archive::Zip),
+        "macos" => ("darwin", "zip", Archive::Zip),
+        _ => ("linux", "tgz", Archive::TarGz),
+    };
+    vec![Release {
+        runtime: Runtime::Ngrok,
+        version: "3-stable".into(),
+        url: format!("https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-{os}-{arch}.{ext}"),
+        sha256: None,
+        archive,
+        label: Some("Stable channel".into()),
+    }]
+}
+
+async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
+    let (name, archive) = match std::env::consts::OS {
+        "windows" => (format!("cloudflared-windows-{arch}.exe"), Archive::File),
+        "macos" => (format!("cloudflared-darwin-{arch}.tgz"), Archive::TarGz),
+        _ => (format!("cloudflared-linux-{arch}"), Archive::File),
+    };
+    github_latest(client, Runtime::Cloudflared, "cloudflare/cloudflared", archive, |n, _| n == name).await
+}
+
 async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     // The all-drivers, all-languages single file.
     github_latest(client, Runtime::Adminer, "vrana/adminer", Archive::File, |n, v| n == format!("adminer-{v}.php"))
@@ -500,7 +540,13 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
     }
     if let Archive::File = kind {
         std::fs::create_dir_all(dest)?;
-        std::fs::copy(archive, dest.join(marker))?;
+        let target = dest.join(marker);
+        std::fs::copy(archive, &target)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))?;
+        }
         return Ok(());
     }
     let file = std::fs::File::open(archive)?;

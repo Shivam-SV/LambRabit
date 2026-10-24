@@ -36,6 +36,7 @@ function useBackendEvents() {
         if (payload.message) notify("error", payload.message);
       }),
       listen("service-health", () => queryClient.invalidateQueries({ queryKey: ["services"] })),
+      listen("tunnels-changed", () => queryClient.invalidateQueries({ queryKey: ["tunnels"] })),
       listen<RawLogLine>("log-line", ({ payload }) => pushLog(payload)),
       listen<InstallProgress>("install-progress", ({ payload }) => {
         setInstall(payload);

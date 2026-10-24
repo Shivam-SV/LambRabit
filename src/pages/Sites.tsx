@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import { api, type Server, type Site } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader, Switch } from "../components/ui";
+import { ShareSite, TunnelsPanel, useTunnels } from "../components/Tunnels";
 
 export default function Sites() {
   const queryClient = useQueryClient();
@@ -118,6 +119,8 @@ export default function Sites() {
         )}
       </div>
 
+      <TunnelsPanel />
+
       {data?.sites.length === 0 ? (
         <Card className="flex flex-col items-center gap-3 px-6 py-14 text-center">
           <div className="flex size-14 items-center justify-center rounded-full bg-accent-soft text-accent-text">
@@ -180,6 +183,7 @@ function SiteCard({ site }: { site: Site }) {
   const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
   const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
   const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
+  const tunnel = useTunnels().data?.find((t) => t.site === site.name);
   const servesPublic = site.docroot !== site.path;
 
   return (
@@ -241,10 +245,12 @@ function SiteCard({ site }: { site: Site }) {
         </div>
       </div>
 
+      {tunnel && <ShareSite site={site} tunnel={tunnel} />}
       <div className="mt-auto flex gap-2">
         <Button variant="soft" className="flex-1" onClick={() => openUrl(site.url).catch(onError)}>
           <ExternalLink size={15} /> Open
         </Button>
+        {!tunnel && <ShareSite site={site} />}
         <Button onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
           <FolderOpen size={15} />
         </Button>

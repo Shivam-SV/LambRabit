@@ -107,6 +107,8 @@ pub struct Versions {
     pub mailpit: Option<String>,
     pub adminer: Option<String>,
     pub phpmyadmin: Option<String>,
+    pub ngrok: Option<String>,
+    pub cloudflared: Option<String>,
 }
 
 impl Default for Settings {

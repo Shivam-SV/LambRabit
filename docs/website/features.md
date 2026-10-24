@@ -98,7 +98,8 @@ Composer is downloaded and verified the first time it's needed.
 
 ### Coming soon
 - **More presets**: dedicated database users and Redis for presets that use them.
-- **Share a site through Ngrok or Cloudflare**: expose a project on a public URL from its card, either automatically or by entering a port.
+### Share a site on the internet (Available)
+Put any site on a public URL from its card, for testing webhooks, showing a client or trying a phone. Requests reach the site with its own domain, so virtual hosts keep working. Share any other local port too (for example a Node dev server). Choose Cloudflare quick tunnels (no account, random trycloudflare.com address) or Ngrok (free account; your authtoken is kept in the system keychain, never in a file). Apps that store their own URL (WordPress, Laravel's `APP_URL`) may still redirect to the `.test` domain.
 
 ---
 
@@ -131,7 +132,7 @@ PHP's `mail()` is pointed at Mailpit for you (Windows: php.ini SMTP settings; ma
 ## 6. Developer tools and runtimes (Coming soon)
 
 - **Node.js through NVM**: install NVM when you ask for it (not by default), then install and switch Node versions from lampRabit. Projects with an `.nvmrc` get the right version. Windows uses nvm-windows (which needs administrator rights or Developer Mode to switch versions; lampRabit tells you before installing); macOS and Linux use the official nvm. An existing NVM installation is detected and reused.
-- **Ngrok and Cloudflare tunnels**: share `localhost` or any project on a public URL. Ngrok needs a free account (your token is stored in the system keychain); Cloudflare quick tunnels need no account.
+- **Tunnels** are available now; see "Share a site on the internet" under Sites.
 
 ---
 

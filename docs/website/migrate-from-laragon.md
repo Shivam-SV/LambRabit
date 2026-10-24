@@ -18,7 +18,7 @@ Laragon and lampRabit work the same way: every folder in `www` becomes `folder.t
 | Run as administrator | Usually | No; asks only for the hosts file and certificate |
 | Quick app (Laravel, WordPress) | Menu → Quick app | Sites → New project, with Laravel, Symfony, WordPress, blank and static presets |
 | Terminal (Cmder) | Built in | Coming soon: Open terminal |
-| Node.js, ngrok | Built in | Coming soon: NVM-managed Node, Ngrok and Cloudflare tunnels |
+| Node.js, ngrok | Built in | Ngrok and Cloudflare tunnels on the Sites page; NVM-managed Node coming soon |
 
 ## Before you start
 
@@ -104,7 +104,6 @@ Once everything works, uninstall Laragon. Keep your `.sql` export until you're s
 These Laragon features are coming soon to lampRabit:
 - **Terminal** → **Open terminal** with PHP, Composer and Node on the PATH.
 - **Node.js** → install and switch versions through NVM.
-- **ngrok** → Ngrok and Cloudflare tunnels, app-wide and per project.
 - **Redis / Memcached**, where the platform supports them.
 - **Tray menu** and **start with Windows**.
 
