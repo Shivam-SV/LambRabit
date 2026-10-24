@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, ffi::OsString, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -11,9 +11,14 @@ use tokio::{
 
 use crate::{
     config::Settings,
+    configs,
     error::{Error, Result},
     layout::{Layout, exe},
+    procgroup::{self, ProcGroup},
 };
+
+/// How long a graceful stop may take before the process tree is killed.
+const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -78,6 +83,7 @@ impl ServiceKind {
 #[serde(rename_all = "lowercase")]
 pub enum ServiceState {
     Stopped,
+    Starting,
     Running,
     Stopping,
     Error,
@@ -112,6 +118,10 @@ struct LaunchSpec {
     program: PathBuf,
     args: Vec<String>,
     cwd: PathBuf,
+    /// Directories prepended to PATH (e.g. PHP's DLLs for mod_php).
+    path_prepend: Vec<PathBuf>,
+    /// Command that asks the service to shut down cleanly.
+    stop_cmd: Option<(PathBuf, Vec<String>)>,
 }
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
@@ -131,24 +141,56 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 path(layout.etc("apache").join("httpd.conf")),
             ],
             cwd: home,
+            path_prepend: settings.versions.php.iter().map(|v| layout.bin("php", v)).collect(),
+            stop_cmd: None,
         },
-        ServiceKind::Mariadb => LaunchSpec {
-            program: home.join("bin").join(exe("mariadbd")),
-            // --defaults-file must be the first argument.
-            args: vec![format!("--defaults-file={}", path(layout.etc("mariadb").join("my.ini")))],
-            cwd: home,
-        },
+        ServiceKind::Mariadb => {
+            let defaults = format!("--defaults-file={}", path(layout.etc("mariadb").join("my.ini")));
+            LaunchSpec {
+                program: home.join("bin").join(exe("mariadbd")),
+                // --defaults-file must be the first argument.
+                args: vec![defaults.clone()],
+                stop_cmd: Some((
+                    home.join("bin").join(exe("mariadb-admin")),
+                    vec![defaults, "--user=root".into(), "shutdown".into()],
+                )),
+                cwd: home,
+                path_prepend: vec![],
+            }
+        }
         ServiceKind::PhpFpm => LaunchSpec {
             program: home.join(exe("php-fpm")),
             args: vec![
                 "--nodaemonize".into(),
                 "--fpm-config".into(),
                 path(layout.etc("php").join("php-fpm.conf")),
+                "-c".into(),
+                path(layout.etc("php").join("php.ini")),
             ],
             cwd: home,
+            path_prepend: vec![],
+            stop_cmd: None,
         },
     };
     Ok(spec)
+}
+
+/// Writes configs and does first-run setup for a service.
+async fn prepare(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
+    layout.ensure()?;
+    match kind {
+        ServiceKind::Apache => {
+            if cfg!(windows) && settings.versions.php.is_some() {
+                configs::write_php(settings, layout)?;
+            }
+            configs::write_apache(settings, layout)
+        }
+        ServiceKind::Mariadb => {
+            configs::write_mariadb(settings, layout)?;
+            configs::init_mariadb_data(settings, layout).await
+        }
+        ServiceKind::PhpFpm => configs::write_php(settings, layout),
+    }
 }
 
 pub fn port_free(port: u16) -> bool {
@@ -158,6 +200,7 @@ pub fn port_free(port: u16) -> bool {
 
 struct Handle {
     pid: Option<u32>,
+    state: ServiceState,
     /// Taken when a stop has been requested.
     stop_tx: Option<oneshot::Sender<()>>,
 }
@@ -174,18 +217,13 @@ impl Supervisor {
             .into_iter()
             .map(|kind| {
                 let handle = running.get(&kind);
-                let state = match handle {
-                    Some(h) if h.stop_tx.is_none() => ServiceState::Stopping,
-                    Some(_) => ServiceState::Running,
-                    None => ServiceState::Stopped,
-                };
                 let installed = launch_spec(kind, settings, layout)
                     .map(|s| s.program.exists())
                     .unwrap_or(false);
                 ServiceInfo {
                     kind,
                     label: kind.label(),
-                    state,
+                    state: handle.map_or(ServiceState::Stopped, |h| h.state),
                     pid: handle.and_then(|h| h.pid),
                     port: kind.port(settings),
                     version: kind.version(settings),
@@ -195,6 +233,10 @@ impl Supervisor {
             .collect()
     }
 
+    pub async fn is_running(&self, kind: ServiceKind) -> bool {
+        self.running.lock().await.contains_key(&kind)
+    }
+
     pub async fn start(
         &self,
         app: &AppHandle,
@@ -202,11 +244,27 @@ impl Supervisor {
         settings: &Settings,
         layout: &Layout,
     ) -> Result<()> {
-        let mut running = self.running.lock().await;
-        if running.contains_key(&kind) {
-            return Ok(());
+        {
+            let mut running = self.running.lock().await;
+            if running.contains_key(&kind) {
+                return Ok(());
+            }
+            // Reserve the slot so concurrent starts don't race during setup.
+            running.insert(kind, Handle { pid: None, state: ServiceState::Starting, stop_tx: None });
         }
+        emit_status(app, kind, ServiceState::Starting, None);
 
+        match self.spawn(app, kind, settings, layout).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.running.lock().await.remove(&kind);
+                emit_status(app, kind, ServiceState::Stopped, None);
+                Err(e)
+            }
+        }
+    }
+
+    async fn spawn(&self, app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
         let spec = launch_spec(kind, settings, layout)?;
         if !spec.program.exists() {
             return Err(Error::msg(format!(
@@ -219,8 +277,8 @@ impl Supervisor {
         if !port_free(port) {
             return Err(Error::msg(format!("Port {port} is already in use")));
         }
+        prepare(kind, settings, layout).await?;
 
-        std::fs::create_dir_all(layout.logs())?;
         let log = OpenOptions::new()
             .create(true)
             .append(true)
@@ -235,35 +293,67 @@ impl Supervisor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+        if !spec.path_prepend.is_empty() {
+            let existing = std::env::var_os("PATH").unwrap_or_default();
+            let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
+            cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
         }
+        procgroup::prepare(&mut cmd);
 
         let mut child = cmd.spawn()?;
+        let group = ProcGroup::attach(&child);
+        if let Err(e) = &group {
+            eprintln!("could not attach {} to a process group: {e}", kind.label());
+        }
         pipe_output(app.clone(), kind, child.stdout.take(), log.clone());
         pipe_output(app.clone(), kind, child.stderr.take(), log);
 
         let (stop_tx, stop_rx) = oneshot::channel();
-        running.insert(kind, Handle { pid: child.id(), stop_tx: Some(stop_tx) });
-        drop(running);
+        self.running.lock().await.insert(
+            kind,
+            Handle { pid: child.id(), state: ServiceState::Running, stop_tx: Some(stop_tx) },
+        );
         emit_status(app, kind, ServiceState::Running, None);
 
         let running = self.running.clone();
         let app = app.clone();
+        let stop_cmd = spec.stop_cmd;
         tauri::async_runtime::spawn(async move {
+            let group = group.ok();
             let (state, message) = tokio::select! {
                 status = child.wait() => match status {
                     Ok(s) if s.success() => (ServiceState::Stopped, None),
-                    Ok(s) => (ServiceState::Error, Some(format!("{} exited with {s}", kind.label()))),
+                    Ok(s) => (
+                        ServiceState::Error,
+                        Some(format!("{} exited with {s}. See the Logs page for details.", kind.label())),
+                    ),
                     Err(e) => (ServiceState::Error, Some(e.to_string())),
                 },
                 _ = stop_rx => {
-                    let _ = child.kill().await;
+                    let asked = match &stop_cmd {
+                        Some((program, args)) => {
+                            let mut c = Command::new(program);
+                            c.args(args).stdout(Stdio::null()).stderr(Stdio::null());
+                            procgroup::prepare(&mut c);
+                            c.status().await.is_ok_and(|s| s.success())
+                        }
+                        None => group.as_ref().is_some_and(|g| g.signal_term()),
+                    };
+                    if !asked || tokio::time::timeout(STOP_TIMEOUT, child.wait()).await.is_err() {
+                        match &group {
+                            Some(g) => g.kill(),
+                            None => { let _ = child.start_kill(); }
+                        }
+                    }
+                    let _ = child.wait().await;
                     (ServiceState::Stopped, None)
                 }
             };
+            // Clean up anything the service left behind (e.g. Apache's worker process).
+            if let Some(g) = &group {
+                g.kill();
+            }
+            drop(group);
             running.lock().await.remove(&kind);
             emit_status(&app, kind, state, message);
         });
@@ -273,9 +363,12 @@ impl Supervisor {
 
     pub async fn stop(&self, app: &AppHandle, kind: ServiceKind) {
         let mut running = self.running.lock().await;
-        if let Some(tx) = running.get_mut(&kind).and_then(|h| h.stop_tx.take()) {
-            let _ = tx.send(());
-            emit_status(app, kind, ServiceState::Stopping, None);
+        if let Some(handle) = running.get_mut(&kind) {
+            if let Some(tx) = handle.stop_tx.take() {
+                handle.state = ServiceState::Stopping;
+                let _ = tx.send(());
+                emit_status(app, kind, ServiceState::Stopping, None);
+            }
         }
     }
 
@@ -289,7 +382,8 @@ impl Supervisor {
                 }
             }
         }
-        for _ in 0..100 {
+        let deadline = tokio::time::Instant::now() + STOP_TIMEOUT + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
             if self.running.lock().await.is_empty() {
                 return;
             }

@@ -23,9 +23,9 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 
 - [x] **0. Scaffold**: Tauri v2 + React + TS + Tailwind
 - [x] **1. Service supervisor**: start/stop/status, port-conflict check, log streaming, cleanup on exit
-- [ ] **2. Runtime manager**: manifest, download with progress, verify, extract, switch active version
-- [ ] **3. Config templating**: httpd.conf / php.ini / my.ini / php-fpm.conf from templates; MariaDB data-dir init
+- [x] **2. Runtime manager**: manifest, download with progress, verify, extract, switch active version
+- [x] **3. Config templating**: httpd.conf / php.ini / my.ini / php-fpm.conf from templates; MariaDB data-dir init
 - [ ] **4. Sites**: `www/foo` → `foo.test`, hosts-file editing via an elevated helper, local CA + HTTPS
-- [ ] **5. Comfort**: tray menu, autostart, "open terminal" with PATH, open in editor, Windows Job Object for child processes
+- [ ] **5. Comfort**: tray menu, autostart, "open terminal" with PATH, open in editor, VC++ runtime check
 - [ ] **6. Extras**: quick-create Laravel/WordPress, Nginx, Redis, Mailpit, Adminer, Node
 - [ ] **7. Release**: installers (NSIS/MSI, dmg, AppImage/deb), auto-updater, CI

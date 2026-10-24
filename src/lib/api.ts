@@ -1,7 +1,31 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type ServiceKind = "apache" | "mariadb" | "php-fpm";
-export type ServiceState = "stopped" | "running" | "stopping" | "error";
+export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
+export type Runtime = "apache" | "php" | "mariadb";
+
+export interface Release {
+  runtime: Runtime;
+  version: string;
+  url: string;
+  sha256: string | null;
+  archive: "zip" | "targz";
+  label: string | null;
+}
+
+export interface InstalledRuntime {
+  runtime: Runtime;
+  active: string | null;
+  versions: string[];
+}
+
+export interface InstallProgress {
+  runtime: Runtime;
+  version: string;
+  stage: "downloading" | "verifying" | "extracting" | "done" | "error";
+  downloaded: number;
+  total: number | null;
+}
 
 export interface ServiceInfo {
   kind: ServiceKind;
@@ -48,4 +72,10 @@ export const api = {
   startAll: () => invoke<string[]>("start_all"),
   stopAll: () => invoke<void>("stop_all"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
+  runtimeCatalog: (runtime: Runtime) => invoke<Release[]>("runtime_catalog", { runtime }),
+  installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),
+  installRuntime: (release: Release) => invoke<void>("install_runtime", { release }),
+  removeRuntime: (runtime: Runtime, version: string) => invoke<void>("remove_runtime", { runtime, version }),
+  setActiveVersion: (runtime: Runtime, version: string) =>
+    invoke<void>("set_active_version", { runtime, version }),
 };

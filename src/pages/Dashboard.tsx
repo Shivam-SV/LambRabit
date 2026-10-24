@@ -7,6 +7,7 @@ import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader } from "../components/ui";
 
 const stateStyles: Record<ServiceState, { dot: string; label: string }> = {
+  starting: { dot: "bg-warn animate-pulse", label: "Starting" },
   running: { dot: "bg-ok", label: "Running" },
   stopping: { dot: "bg-warn animate-pulse", label: "Stopping" },
   stopped: { dot: "bg-muted/60", label: "Stopped" },
@@ -101,7 +102,7 @@ function ServiceCard({ service }: { service: ServiceInfo }) {
         <Button
           variant="primary"
           onClick={() => start.mutate()}
-          disabled={!service.installed || start.isPending || service.state === "stopping"}
+          disabled={!service.installed || start.isPending || service.state !== "stopped"}
           title={service.installed ? undefined : "Install this runtime from the Versions page"}
         >
           <Play size={14} /> Start

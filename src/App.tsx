@@ -3,13 +3,14 @@ import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
 import { Gauge, Globe, Layers, Monitor, Moon, ScrollText, Settings as SettingsIcon, Sun } from "lucide-react";
 import clsx from "clsx";
-import type { LogEvent, StatusEvent } from "./lib/api";
+import type { InstallProgress, LogEvent, StatusEvent } from "./lib/api";
 import { useAppStore } from "./lib/store";
 import { useTheme, type Theme } from "./lib/theme";
 import Dashboard from "./pages/Dashboard";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
 import Placeholder from "./pages/Placeholder";
+import Versions from "./pages/Versions";
 import Notices from "./components/Notices";
 import Logo from "./components/Logo";
 
@@ -33,6 +34,7 @@ function useBackendEvents() {
   const queryClient = useQueryClient();
   const pushLog = useAppStore((s) => s.pushLog);
   const notify = useAppStore((s) => s.notify);
+  const setInstall = useAppStore((s) => s.setInstall);
 
   useEffect(() => {
     const unlisten = [
@@ -41,9 +43,16 @@ function useBackendEvents() {
         if (payload.message) notify("error", payload.message);
       }),
       listen<LogEvent>("service-log", ({ payload }) => pushLog(payload.kind, payload.line)),
+      listen<InstallProgress>("install-progress", ({ payload }) => {
+        setInstall(payload);
+        if (payload.stage === "done" || payload.stage === "error") {
+          queryClient.invalidateQueries({ queryKey: ["installed"] });
+          queryClient.invalidateQueries({ queryKey: ["services"] });
+        }
+      }),
     ];
     return () => unlisten.forEach((p) => p.then((off) => off()));
-  }, [queryClient, pushLog, notify]);
+  }, [queryClient, pushLog, notify, setInstall]);
 }
 
 function ThemeSwitch() {
@@ -113,9 +122,7 @@ export default function App() {
         {page === "sites" && (
           <Placeholder title="Sites" phase={4} text="Folders in www/ become http(s)://name.test with local SSL." />
         )}
-        {page === "versions" && (
-          <Placeholder title="Versions" phase={2} text="Download and switch Apache, PHP and MariaDB versions." />
-        )}
+        {page === "versions" && <Versions />}
         {page === "logs" && <Logs />}
         {page === "settings" && <Settings />}
       </main>
