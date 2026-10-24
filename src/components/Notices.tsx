@@ -14,8 +14,8 @@ export default function Notices() {
           className={clsx(
             "pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
             n.tone === "error"
-              ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
-              : "border-zinc-200 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
+              ? "border-danger/30 bg-danger-soft text-danger-text backdrop-blur"
+              : "border-line bg-surface text-fg",
           )}
         >
           <span className="selectable flex-1 break-words">{n.text}</span>

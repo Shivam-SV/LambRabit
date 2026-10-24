@@ -7,10 +7,10 @@ import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader } from "../components/ui";
 
 const stateStyles: Record<ServiceState, { dot: string; label: string }> = {
-  running: { dot: "bg-emerald-500", label: "Running" },
-  stopping: { dot: "bg-amber-500 animate-pulse", label: "Stopping" },
-  stopped: { dot: "bg-zinc-400", label: "Stopped" },
-  error: { dot: "bg-red-500", label: "Error" },
+  running: { dot: "bg-ok", label: "Running" },
+  stopping: { dot: "bg-warn animate-pulse", label: "Stopping" },
+  stopped: { dot: "bg-muted/60", label: "Stopped" },
+  error: { dot: "bg-danger", label: "Error" },
 };
 
 export default function Dashboard() {
@@ -55,7 +55,7 @@ export default function Dashboard() {
       </div>
 
       {paths.data && (
-        <p className="selectable px-8 pb-8 text-xs text-zinc-500">
+        <p className="selectable px-8 pb-8 text-xs text-muted">
           Environment root: <code className="font-mono">{paths.data.root}</code>
         </p>
       )}
@@ -76,20 +76,20 @@ function ServiceCard({ service }: { service: ServiceInfo }) {
       <div className="flex items-start justify-between">
         <div>
           <div className="font-medium">{service.label}</div>
-          <div className="text-sm text-zinc-500">
+          <div className="text-sm text-muted">
             {service.version ? `v${service.version}` : "Not installed"}
           </div>
         </div>
-        <span className="flex items-center gap-1.5 text-xs text-zinc-500">
+        <span className="flex items-center gap-1.5 text-xs text-muted">
           <span className={clsx("size-2 rounded-full", style.dot)} />
           {style.label}
         </span>
       </div>
 
       <dl className="grid grid-cols-2 gap-y-1 text-sm">
-        <dt className="text-zinc-500">Port</dt>
+        <dt className="text-muted">Port</dt>
         <dd className="text-right font-mono">{service.port}</dd>
-        <dt className="text-zinc-500">PID</dt>
+        <dt className="text-muted">PID</dt>
         <dd className="text-right font-mono">{service.pid ?? "—"}</dd>
       </dl>
 

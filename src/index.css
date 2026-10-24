@@ -1,8 +1,99 @@
 @import "tailwindcss";
 
+/*
+ * Brand palette (from the logo): charcoal #1b2028, mint #59d1a2, white.
+ * Semantic tokens below map to Tailwind utilities: bg-surface, text-muted, bg-accent, ...
+ * Light is the base; dark applies via system preference or data-theme="dark".
+ */
 @theme {
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-text: var(--danger-text);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+}
+
+:root {
+  color-scheme: light;
+  --bg: #f4f7f6;
+  --surface: #ffffff;
+  --surface-2: #eef2f1;
+  --line: #dde3e1;
+  --fg: #1b2028;
+  --muted: #5d6775;
+  --accent: #168a64;
+  --accent-hover: #117353;
+  --accent-fg: #ffffff;
+  --accent-soft: #e2f5ed;
+  --accent-text: #117353;
+  --danger: #d1435b;
+  --danger-hover: #b33349;
+  --danger-soft: #fdecef;
+  --danger-text: #a3283d;
+  --ok: #1fa774;
+  --warn: #d99a1e;
+  --logo-head: #1b2028;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #13171d;
+  --surface: #1b2028;
+  --surface-2: #232a34;
+  --line: #2d3540;
+  --fg: #e7ecf1;
+  --muted: #8d98a7;
+  --accent: #59d1a2;
+  --accent-hover: #74dcb4;
+  --accent-fg: #0e1a15;
+  --accent-soft: rgb(89 209 162 / 0.12);
+  --accent-text: #6fdcb2;
+  --danger: #ef6b7f;
+  --danger-hover: #f4889a;
+  --danger-soft: rgb(239 107 127 / 0.12);
+  --danger-text: #f59aa8;
+  --ok: #59d1a2;
+  --warn: #f0b84a;
+  --logo-head: #3a4452;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #13171d;
+    --surface: #1b2028;
+    --surface-2: #232a34;
+    --line: #2d3540;
+    --fg: #e7ecf1;
+    --muted: #8d98a7;
+    --accent: #59d1a2;
+    --accent-hover: #74dcb4;
+    --accent-fg: #0e1a15;
+    --accent-soft: rgb(89 209 162 / 0.12);
+    --accent-text: #6fdcb2;
+    --danger: #ef6b7f;
+    --danger-hover: #f4889a;
+    --danger-soft: rgb(239 107 127 / 0.12);
+    --danger-text: #f59aa8;
+    --ok: #59d1a2;
+    --warn: #f0b84a;
+    --logo-head: #3a4452;
+  }
 }
 
 html,
@@ -12,7 +103,7 @@ body,
 }
 
 body {
-  @apply bg-zinc-50 text-zinc-900 antialiased select-none dark:bg-zinc-950 dark:text-zinc-100;
+  @apply bg-bg text-fg antialiased select-none;
 }
 
 input,

@@ -4,10 +4,9 @@ import clsx from "clsx";
 type Variant = "primary" | "secondary" | "danger";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-orange-600 text-white hover:bg-orange-700 disabled:bg-orange-600/50",
-  secondary:
-    "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800",
-  danger: "bg-red-600 text-white hover:bg-red-700 disabled:bg-red-600/50",
+  primary: "bg-accent text-accent-fg hover:bg-accent-hover",
+  secondary: "border border-line bg-surface text-fg hover:bg-surface-2",
+  danger: "bg-danger text-white hover:bg-danger-hover",
 };
 
 export function Button({
@@ -19,7 +18,7 @@ export function Button({
     <button
       {...props}
       className={clsx(
-        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant],
         className,
       )}
@@ -37,14 +36,8 @@ export function PageHeader({ title, actions }: { title: string; actions?: ReactN
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <div
-      className={clsx(
-        "rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
+  return <div className={clsx("rounded-xl border border-line bg-surface", className)}>{children}</div>;
 }
+
+export const inputClass =
+  "w-full rounded-md border border-line bg-bg px-2.5 py-1.5 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/25";

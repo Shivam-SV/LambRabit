@@ -30,7 +30,7 @@ export default function Logs() {
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value as ServiceKind | "all")}
-              className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="rounded-md border border-line bg-surface px-2 py-1.5 text-sm"
             >
               {filters.map((f) => (
                 <option key={f.id} value={f.id}>
@@ -46,13 +46,13 @@ export default function Logs() {
       />
       <Card className="mx-8 mb-8 min-h-0 flex-1 overflow-auto p-4">
         {visible.length === 0 ? (
-          <p className="text-sm text-zinc-500">No output yet. Service output appears here while they run.</p>
+          <p className="text-sm text-muted">No output yet. Service output appears here while they run.</p>
         ) : (
           <pre className="selectable font-mono text-xs leading-relaxed">
             {visible.map((l) => (
               <div key={l.id}>
-                <span className="text-zinc-400">{l.at.toLocaleTimeString()} </span>
-                <span className="text-orange-600 dark:text-orange-400">[{l.kind}] </span>
+                <span className="text-muted">{l.at.toLocaleTimeString()} </span>
+                <span className="text-accent-text">[{l.kind}] </span>
                 {l.line}
               </div>
             ))}

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { api, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
-import { Button, Card, PageHeader } from "../components/ui";
+import { Button, Card, PageHeader, inputClass } from "../components/ui";
 
 const portFields = [
   { key: "http", label: "HTTP" },
@@ -88,15 +88,12 @@ export default function Settings() {
   );
 }
 
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950";
-
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1">
       <span className="text-sm font-medium">{label}</span>
       {children}
-      {hint && <span className="block text-xs text-zinc-500">{hint}</span>}
+      {hint && <span className="block text-xs text-muted">{hint}</span>}
     </label>
   );
 }

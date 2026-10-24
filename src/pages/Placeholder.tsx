@@ -5,8 +5,8 @@ export default function Placeholder({ title, phase, text }: { title: string; pha
     <>
       <PageHeader title={title} />
       <div className="px-8">
-        <Card className="p-6 text-sm text-zinc-500">
-          <span className="mr-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium dark:bg-zinc-800">
+        <Card className="p-6 text-sm text-muted">
+          <span className="mr-2 rounded bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent-text">
             Phase {phase}
           </span>
           {text}
