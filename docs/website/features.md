@@ -42,13 +42,23 @@ Run Apache, Nginx, or both. With both, Apache keeps ports 80/443 and Nginx gets 
 
 Platform note: Nginx downloads are Windows-only for now (nginx.org publishes Windows builds only); macOS and Linux support is coming soon.
 
-### Coming soon
-- **System tray**: start/stop services and open sites from the tray.
-- **Start with the computer** and optionally start services automatically.
-- **Open a terminal** with PHP, Composer, MariaDB and Node on the PATH.
-- **Open in editor**: open a project in VS Code or another editor.
-- **Visual C++ runtime check**: detect and offer to install the Microsoft runtime Apache and PHP need on Windows.
-- **MariaDB data per major version**: switching MariaDB major versions keeps separate data directories (or upgrades them) instead of risking incompatibility.
+### System tray (Available)
+lampRabit lives in the system tray: start or stop everything, open the www folder or a terminal, and quit from its menu. Closing the window keeps your services running (you can turn this off).
+
+### Start with your computer (Available)
+Start lampRabit when you sign in (it opens quietly in the tray), and optionally start all services as soon as it opens.
+
+### Open a terminal (Available)
+A terminal with PHP, Composer and the MariaDB client on the PATH, from the title bar, the tray or any site card (opens in the project folder).
+
+### Open in editor (Available)
+Open any project in VS Code, Cursor, PhpStorm, Sublime Text, Zed or another editor command of your choice.
+
+### Visual C++ runtime check (Available, Windows)
+Apache and PHP on Windows need Microsoft's Visual C++ runtime. lampRabit checks for it and, if it's missing, installs it with one click (one administrator prompt).
+
+### Safe MariaDB upgrades (Available)
+lampRabit remembers which MariaDB version last used your databases. Moving to a newer release upgrades the system tables automatically; moving back to an older one is blocked with an explanation, because it can damage data.
 
 ---
 

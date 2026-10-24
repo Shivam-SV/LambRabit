@@ -622,7 +622,24 @@ impl Supervisor {
                 return Err(Error::msg(message));
             }
         }
+        let upgrade_from = if kind == ServiceKind::Mariadb {
+            match configs::mariadb_version_guard(settings, layout) {
+                Ok(previous) => previous,
+                Err(e) => {
+                    self.set_problem(
+                        kind,
+                        Problem::new("MariaDB data is from a newer version", e.to_string(), &["Switch back on the Services page."]),
+                    );
+                    return Err(e);
+                }
+            }
+        } else {
+            None
+        };
         let plan = prepare(app, kind, settings, layout).await?;
+        if kind == ServiceKind::Mariadb && upgrade_from.is_none() && !configs::mariadb_marker_exists(layout) {
+            configs::write_mariadb_marker(settings, layout);
+        }
         if kind.web_server().is_some() {
             if let Some(output) = server_config_test(&spec).await {
                 let line = output
@@ -695,6 +712,23 @@ impl Supervisor {
             },
         );
         emit_status(app, kind, ServiceState::Running, None);
+        if let Some(previous) = upgrade_from {
+            let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
+            let port = settings.ports.mysql;
+            tauri::async_runtime::spawn(async move {
+                for _ in 0..60 {
+                    if matches!(diagnose::probe_mysql(port).await, Probe::Ok) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                logs::system(&app, Level::Info, format!("Upgrading MariaDB system tables from {previous}"));
+                match configs::mariadb_upgrade(&settings, &layout).await {
+                    Ok(_) => logs::system(&app, Level::Info, "MariaDB upgrade finished"),
+                    Err(e) => logs::system(&app, Level::Error, e.to_string()),
+                }
+            });
+        }
 
         let running = self.running.clone();
         let problems = self.problems.clone();

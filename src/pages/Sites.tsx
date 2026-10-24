@@ -3,8 +3,10 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
   AlertTriangle,
   ExternalLink,
+  Code2,
   FolderOpen,
   FolderPlus,
+  SquareTerminal,
   Globe,
   Lock,
   LockOpen,
@@ -18,6 +20,7 @@ import { api, type Server, type Site } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader, Switch } from "../components/ui";
 import { ShareSite, TunnelsPanel, useTunnels } from "../components/Tunnels";
+import Menu from "../components/Menu";
 
 export default function Sites() {
   const queryClient = useQueryClient();
@@ -263,6 +266,12 @@ function SiteCard({ site }: { site: Site }) {
         <Button onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
           <FolderOpen size={15} />
         </Button>
+        <Menu
+          items={[
+            { label: "Open in editor", icon: <Code2 size={15} />, onSelect: () => api.openInEditor(site.path).catch(onError) },
+            { label: "Open terminal here", icon: <SquareTerminal size={15} />, onSelect: () => api.openTerminal(site.path).catch(onError) },
+          ]}
+        />
       </div>
     </Card>
   );

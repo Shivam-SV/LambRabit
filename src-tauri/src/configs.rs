@@ -329,6 +329,68 @@ port={port}
     Ok(())
 }
 
+fn mariadb_marker(layout: &Layout) -> PathBuf {
+    layout.data("mariadb").join("lamprabit-version")
+}
+
+fn release_line(version: &str) -> (u32, u32) {
+    let mut parts = version.split('.').map(|p| p.parse().unwrap_or(0));
+    (parts.next().unwrap_or(0), parts.next().unwrap_or(0))
+}
+
+/// Guards the data directory against version switches. Returns the previous version when
+/// the data comes from an older release line and needs `mariadb-upgrade` after start;
+/// refuses to start an older MariaDB on newer data, which can damage it.
+pub fn mariadb_version_guard(settings: &Settings, layout: &Layout) -> Result<Option<String>> {
+    let Some(current) = settings.versions.mariadb.clone() else { return Ok(None) };
+    if !layout.data("mariadb").join("mysql").exists() {
+        return Ok(None); // fresh data directory; marked after initialisation
+    }
+    let Ok(previous) = std::fs::read_to_string(mariadb_marker(layout)).map(|s| s.trim().to_string()) else {
+        // Data from before lampRabit tracked versions: assume it matches.
+        write_mariadb_marker(settings, layout);
+        return Ok(None);
+    };
+    match release_line(&previous).cmp(&release_line(&current)) {
+        std::cmp::Ordering::Greater => Err(Error::msg(format!(
+            "The database files were last used by MariaDB {previous}. Starting the older {current} on them isn't supported and can damage data. Switch back to {previous} (Services → MariaDB), or move data/mariadb aside to start with an empty database."
+        ))),
+        std::cmp::Ordering::Less => Ok(Some(previous)),
+        std::cmp::Ordering::Equal => {
+            if previous != current {
+                write_mariadb_marker(settings, layout); // patch release: nothing to upgrade
+            }
+            Ok(None)
+        }
+    }
+}
+
+pub fn mariadb_marker_exists(layout: &Layout) -> bool {
+    mariadb_marker(layout).exists()
+}
+
+pub fn write_mariadb_marker(settings: &Settings, layout: &Layout) {
+    if let Some(v) = &settings.versions.mariadb {
+        let _ = std::fs::write(mariadb_marker(layout), v);
+    }
+}
+
+/// Upgrades system tables after moving to a newer MariaDB release line.
+pub async fn mariadb_upgrade(settings: &Settings, layout: &Layout) -> Result<String> {
+    let home = mariadb_home(settings, layout)?;
+    let mut cmd = tokio::process::Command::new(home.join("bin").join(exe("mariadb-upgrade")));
+    cmd.arg(format!("--defaults-file={}", layout.etc("mariadb").join("my.ini").display())).arg("--user=root").current_dir(&home);
+    crate::procgroup::prepare(&mut cmd);
+    let out = cmd.output().await?;
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    if out.status.success() {
+        write_mariadb_marker(settings, layout);
+        Ok(text)
+    } else {
+        Err(Error::msg(format!("mariadb-upgrade failed: {}", text.lines().last().unwrap_or_default())))
+    }
+}
+
 /// Creates the system tables on first start. Root gets an empty password, like XAMPP/Laragon.
 pub async fn init_mariadb_data(settings: &Settings, layout: &Layout) -> Result<()> {
     let data = layout.data("mariadb");

@@ -1,3 +1,4 @@
+mod comfort;
 mod config;
 mod configs;
 mod diagnose;
@@ -508,6 +509,104 @@ async fn runtime_updates(state: State<'_, AppState>) -> Result<Vec<runtimes::Upd
 }
 
 #[tauri::command]
+async fn open_terminal(state: State<'_, AppState>, dir: Option<PathBuf>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    comfort::open_terminal(&settings, &layout, &dir.unwrap_or_else(|| layout.www()))
+}
+
+#[tauri::command]
+async fn open_in_editor(state: State<'_, AppState>, dir: PathBuf) -> Result<()> {
+    let (settings, _) = state.snapshot().await;
+    comfort::open_in_editor(&settings, &dir).await
+}
+
+#[tauri::command]
+fn vc_runtime_status() -> comfort::VcRuntime {
+    comfort::vc_runtime()
+}
+
+#[tauri::command]
+async fn vc_runtime_install(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    logs::system(&app, logs::Level::Info, "Installing the Microsoft Visual C++ runtime");
+    comfort::install_vc_runtime(&state.http, &layout).await?;
+    logs::system(&app, logs::Level::Info, "Microsoft Visual C++ runtime installed");
+    Ok(())
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem, PredefinedMenuItem},
+        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    };
+    let menu = Menu::with_items(
+        app,
+        &[
+            &MenuItem::with_id(app, "open", "Open lampRabit", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "start", "Start all", true, None::<&str>)?,
+            &MenuItem::with_id(app, "stop", "Stop all", true, None::<&str>)?,
+            &MenuItem::with_id(app, "www", "Open www folder", true, None::<&str>)?,
+            &MenuItem::with_id(app, "terminal", "Open terminal", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "quit", "Quit lampRabit", true, None::<&str>)?,
+        ],
+    )?;
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("lampRabit")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| {
+            let app = app.clone();
+            match event.id.as_ref() {
+                "open" => show_main(&app),
+                "quit" => app.exit(0),
+                id => {
+                    let id = id.to_string();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app.state::<AppState>();
+                        match id.as_str() {
+                            "start" => {
+                                let _ = start_all(app.clone(), state).await;
+                            }
+                            "stop" => {
+                                let _ = stop_all(app.clone(), state).await;
+                            }
+                            "www" => {
+                                let (_, layout) = state.snapshot().await;
+                                use tauri_plugin_opener::OpenerExt;
+                                let _ = app.opener().open_path(layout.www().to_string_lossy(), None::<&str>);
+                            }
+                            "terminal" => {
+                                let _ = open_terminal(state, None).await;
+                            }
+                            _ => {}
+                        }
+                    });
+                }
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn php_status(state: State<'_, AppState>) -> Result<Vec<php::PoolStatus>> {
     Ok(state.supervisor.php.status().await)
 }
@@ -931,6 +1030,21 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
+        .on_window_event(|window, event| {
+            // Closing keeps lampRabit (and its services) running in the tray.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<AppState>();
+                let to_tray = tauri::async_runtime::block_on(async { state.settings.read().await.close_to_tray });
+                if to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.toml");
             let mut settings = Settings::load(&settings_path)?;
@@ -973,6 +1087,22 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 }
             });
+
+            setup_tray(app)?;
+            // Started with the OS: stay in the tray.
+            if std::env::args().any(|a| a == "--minimized") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = handle.state::<AppState>();
+                if state.settings.read().await.start_services_on_launch {
+                    logs::system(&handle, logs::Level::Info, "Starting services on launch");
+                    let _ = start_all(handle.clone(), state).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1000,6 +1130,10 @@ pub fn run() {
             set_site_server,
             php_status,
             create_project,
+            open_terminal,
+            open_in_editor,
+            vc_runtime_status,
+            vc_runtime_install,
             runtime_updates,
             node_status,
             node_available,

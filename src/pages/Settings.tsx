@@ -25,6 +25,7 @@ import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
 import { installAppUpdate, useAppUpdate } from "../lib/updates";
 import { getVersion } from "@tauri-apps/api/app";
+import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, IconTile, PageHeader, SectionCard, Segmented, Switch, inputClass } from "../components/ui";
 
@@ -171,6 +172,32 @@ export default function Settings() {
               checked={draft.httpsByDefault}
               onChange={(v) => setDraft({ ...draft, httpsByDefault: v })}
             />
+            <Toggle
+              label="Keep running in the tray when closed"
+              hint="Closing the window leaves lampRabit and your services running; quit from the tray icon."
+              checked={draft.closeToTray}
+              onChange={(v) => setDraft({ ...draft, closeToTray: v })}
+            />
+            <AutostartToggle />
+            <Toggle
+              label="Start services when lampRabit opens"
+              hint="Starts every installed service, so your sites are up right after you sign in."
+              checked={draft.startServicesOnLaunch}
+              onChange={(v) => setDraft({ ...draft, startServicesOnLaunch: v })}
+            />
+            <Field label="Editor command" hint={'Used by "Open in editor" on site cards: code (VS Code), cursor, phpstorm, subl, zed…'}>
+              <input
+                className={inputClass}
+                list="editor-presets"
+                value={draft.editor}
+                onChange={(e) => setDraft({ ...draft, editor: e.target.value })}
+              />
+              <datalist id="editor-presets">
+                {["code", "cursor", "phpstorm", "subl", "zed", "codium"].map((e) => (
+                  <option key={e} value={e} />
+                ))}
+              </datalist>
+            </Field>
             {draft.tld === "localhost" ? (
               <p className="text-xs text-muted">
                 .localhost domains resolve on their own, so the hosts file is left untouched.
@@ -585,5 +612,27 @@ function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boo
         />
       </div>
     </SectionCard>
+  );
+}
+
+/** Start with the OS. Applied immediately through the OS (no Save needed). */
+function AutostartToggle() {
+  const notify = useAppStore((s) => s.notify);
+  const enabled = useQuery({ queryKey: ["autostart"], queryFn: isAutostartEnabled });
+  const queryClient = useQueryClient();
+  return (
+    <Toggle
+      label="Start lampRabit when I sign in"
+      hint="Opens in the tray, out of the way. Applies immediately."
+      checked={!!enabled.data}
+      onChange={async (v) => {
+        try {
+          await (v ? enableAutostart() : disableAutostart());
+          queryClient.invalidateQueries({ queryKey: ["autostart"] });
+        } catch (e) {
+          notify("error", String(e));
+        }
+      }}
+    />
   );
 }

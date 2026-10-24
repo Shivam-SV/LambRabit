@@ -139,6 +139,7 @@ export default function Overview() {
         </div>
       </section>
 
+      <VcRuntimeBanner />
       <QuickLinks sites={sites.data} services={services.data ?? []} mailUi={mailUi} />
 
       <section className="grid gap-5 md:grid-cols-2">
@@ -325,6 +326,31 @@ function ServiceCard({
 
 /** Services shown on Overview only once installed. */
 const optional: ServiceKind[] = ["mailpit", "redis", "memcached"];
+
+/** Windows: Apache and PHP need Microsoft's Visual C++ runtime. */
+function VcRuntimeBanner() {
+  const notify = useAppStore((s) => s.notify);
+  const status = useQuery({ queryKey: ["vc-runtime"], queryFn: api.vcRuntimeStatus });
+  const install = useMutation({
+    mutationFn: api.vcRuntimeInstall,
+    onSuccess: () => {
+      notify("info", "Visual C++ runtime installed");
+      status.refetch();
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+  if (!status.data?.applicable || status.data.installed) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-warn/30 bg-warn/10 px-5 py-3.5">
+      <p className="min-w-60 flex-1 text-sm">
+        Apache and PHP need the Microsoft Visual C++ runtime, which isn't installed. Windows asks for administrator approval once.
+      </p>
+      <Button variant="primary" onClick={() => install.mutate()} disabled={install.isPending}>
+        {install.isPending ? "Installing…" : "Install runtime"}
+      </Button>
+    </div>
+  );
+}
 
 function serverEnabled(kind: ServiceKind, mode: WebServer | undefined) {
   if (kind === "apache") return mode !== "nginx";

@@ -67,7 +67,7 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
 
 ## Phase 7: comfort and PHP tooling
 
-### 7.1 Comfort
+### 7.1 Comfort ✅
 - Tray menu (start/stop all, open sites, quit), start with the OS, optionally start services on launch.
 - "Open terminal" with PHP, Composer, MariaDB and Node on PATH; "Open in editor" for projects.
 - Microsoft Visual C++ runtime check on Windows, with a link to (or download of) the redistributable.

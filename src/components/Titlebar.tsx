@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Copy, FolderOpen, Minus, Play, Square, X } from "lucide-react";
+import { Copy, FolderOpen, Minus, Play, Square, SquareTerminal, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
@@ -58,6 +58,9 @@ export default function Titlebar() {
         )}
         <Button size="sm" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data}>
           <FolderOpen size={15} /> Open www
+        </Button>
+        <Button size="sm" onClick={() => api.openTerminal(null).catch(onError)} aria-label="Open terminal" title="Terminal with php, composer and mariadb">
+          <SquareTerminal size={15} />
         </Button>
         {anyRunning ? (
           <Button size="sm" onClick={() => stopAll.mutate()} disabled={stopAll.isPending}>

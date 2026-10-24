@@ -240,6 +240,9 @@ export interface Settings {
   manageHosts: boolean;
   routeMail: boolean;
   checkUpdates: boolean;
+  closeToTray: boolean;
+  startServicesOnLaunch: boolean;
+  editor: string;
   sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null }>;
 }
 
@@ -278,6 +281,10 @@ export const api = {
   nodeUninstall: (version: string) => invoke<void>("node_uninstall", { version }),
   nvmInstall: () => invoke<void>("nvm_install"),
   runtimeUpdates: () => invoke<UpdateNotice[]>("runtime_updates"),
+  openTerminal: (dir: string | null) => invoke<void>("open_terminal", { dir }),
+  openInEditor: (dir: string) => invoke<void>("open_in_editor", { dir }),
+  vcRuntimeStatus: () => invoke<{ applicable: boolean; installed: boolean; version: string | null }>("vc_runtime_status"),
+  vcRuntimeInstall: () => invoke<void>("vc_runtime_install"),
   setNgrokToken: (token: string | null) => invoke<void>("set_ngrok_token", { token }),
   trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),

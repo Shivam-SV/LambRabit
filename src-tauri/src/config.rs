@@ -28,6 +28,12 @@ pub struct Settings {
     pub route_mail: bool,
     /// Look for a new lampRabit release when the app starts.
     pub check_updates: bool,
+    /// Closing the window keeps lampRabit (and its services) running in the tray.
+    pub close_to_tray: bool,
+    /// Start every installed service when lampRabit opens.
+    pub start_services_on_launch: bool,
+    /// Command used for "Open in editor" (e.g. "code", "cursor", "phpstorm").
+    pub editor: String,
     /// Per-site overrides keyed by folder name.
     pub sites: BTreeMap<String, SiteSettings>,
 }
@@ -130,6 +136,9 @@ impl Default for Settings {
             manage_hosts: true,
             route_mail: true,
             check_updates: true,
+            close_to_tray: true,
+            start_services_on_launch: false,
+            editor: "code".into(),
             sites: BTreeMap::new(),
         }
     }
