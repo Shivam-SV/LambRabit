@@ -9,7 +9,7 @@ The updater only installs updates signed with lampRabit's key. The public half i
 1. The key pair was generated on the maintainer's machine at `~/.tauri/lamprabit-updater.key` (private) and `.key.pub` (public), with no password. **Back up the private key somewhere safe** (a password manager). If it's lost, existing installs can't be updated automatically any more.
 2. In GitHub → repository → Settings → Secrets and variables → Actions, add:
    - `TAURI_SIGNING_PRIVATE_KEY`: the full contents of `lamprabit-updater.key`.
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: empty (add it anyway, with an empty value), or the password if you regenerate the key with one.
+   - No password secret is needed: the key has none, and the workflow passes an empty `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. If you regenerate the key with a password, add it as a secret and reference it in release.yml.
 
 To rotate the key: `npx tauri signer generate -w ~/.tauri/lamprabit-updater.key`, put the new `.pub` contents in `tauri.conf.json`, update the secret. Installs made with the old key won't accept updates signed with the new one.
 
