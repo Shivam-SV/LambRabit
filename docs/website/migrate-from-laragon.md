@@ -103,7 +103,6 @@ Once everything works, uninstall Laragon. Keep your `.sql` export until you're s
 
 These Laragon features are coming soon to lampRabit:
 - **Terminal** → **Open terminal** with PHP, Composer and Node on the PATH.
-- **Redis / Memcached**, where the platform supports them.
 - **Tray menu** and **start with Windows**.
 
 ## Troubleshooting

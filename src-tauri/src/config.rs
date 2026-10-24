@@ -92,6 +92,8 @@ pub struct Ports {
     pub nginx_https: u16,
     /// Mailpit's SMTP server, where PHP and frameworks send mail.
     pub mail_smtp: u16,
+    pub redis: u16,
+    pub memcached: u16,
     /// Mailpit's web inbox.
     pub mail_ui: u16,
 }
@@ -109,6 +111,8 @@ pub struct Versions {
     pub phpmyadmin: Option<String>,
     pub ngrok: Option<String>,
     pub cloudflared: Option<String>,
+    pub redis: Option<String>,
+    pub dotnet: Option<String>,
 }
 
 impl Default for Settings {
@@ -138,6 +142,8 @@ impl Default for Ports {
             nginx_http: 8080,
             nginx_https: 8443,
             mail_smtp: 1025,
+            redis: 6379,
+            memcached: 11211,
             mail_ui: 8025,
         }
     }

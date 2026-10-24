@@ -34,6 +34,8 @@ const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; 
   { key: "nginxHttps", label: "Nginx HTTPS", hint: "Nginx's own HTTPS port next to Apache.", both: true },
   { key: "mysql", label: "MariaDB", hint: "MySQL-compatible database port." },
   { key: "phpFpm", label: "PHP FastCGI ports", hint: "Start of the range PHP workers use: 10 ports per PHP version." },
+  { key: "redis", label: "Redis", hint: "Redis-compatible cache (Garnet)." },
+  { key: "memcached", label: "Memcached", hint: "System memcached.", only: ["macos", "linux"] },
 ];
 
 const runtimeHints = (os: Os | undefined): Partial<Record<Runtime, string>> => ({

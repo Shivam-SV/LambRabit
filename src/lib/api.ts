@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit";
+export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit" | "redis" | "memcached";
 export type WebServer = "apache" | "nginx" | "both";
 export type Server = "apache" | "nginx";
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
@@ -13,15 +13,19 @@ export type Runtime =
   | "adminer"
   | "phpmyadmin"
   | "ngrok"
-  | "cloudflared";
+  | "cloudflared"
+  | "redis"
+  | "dotnet";
 export const coreRuntimes: Runtime[] = ["apache", "nginx", "php", "mariadb"];
-export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin", "ngrok", "cloudflared"];
+export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin", "redis", "ngrok", "cloudflared"];
 
 export const serviceLabels: Record<ServiceKind, string> = {
   apache: "Apache",
   nginx: "Nginx",
   mariadb: "MariaDB",
   mailpit: "Mailpit",
+  redis: "Redis",
+  memcached: "Memcached",
 };
 
 export const runtimeLabels: Record<Runtime, string> = {
@@ -34,6 +38,8 @@ export const runtimeLabels: Record<Runtime, string> = {
   phpmyadmin: "phpMyAdmin",
   ngrok: "Ngrok",
   cloudflared: "Cloudflare Tunnel",
+  redis: "Redis (Garnet)",
+  dotnet: ".NET runtime",
 };
 
 export type TunnelProvider = "ngrok" | "cloudflare";
@@ -196,7 +202,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mailpit" | "system";
+export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mailpit" | "redis" | "memcached" | "system";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -218,6 +224,8 @@ export interface Settings {
     nginxHttps: number;
     mailSmtp: number;
     mailUi: number;
+    redis: number;
+    memcached: number;
   };
   versions: Record<Runtime, string | null>;
   webServer: WebServer;

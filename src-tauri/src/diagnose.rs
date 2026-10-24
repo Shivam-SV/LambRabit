@@ -255,6 +255,24 @@ pub async fn probe_http(client: &reqwest::Client, url: &str) -> Probe {
     }
 }
 
+/// Sends a one-line command and expects a reply starting with `expect` (Redis PING,
+/// Memcached version).
+pub async fn probe_line(port: u16, command: &[u8], expect: &str) -> Probe {
+    use tokio::io::AsyncWriteExt;
+    let attempt = async {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+        stream.write_all(command).await.ok()?;
+        let mut buf = [0u8; 128];
+        let n = stream.read(&mut buf).await.ok()?;
+        Some(String::from_utf8_lossy(&buf[..n]).to_string())
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(3), attempt).await {
+        Ok(Some(reply)) if reply.starts_with(expect) => Probe::Ok,
+        Ok(Some(reply)) => Probe::Bad(format!("Unexpected reply: {}", reply.trim())),
+        _ => Probe::Bad(format!("Not accepting connections on port {port}")),
+    }
+}
+
 /// MySQL/MariaDB greet every new connection; a greeting means the server is ready,
 /// an error packet carries the reason it isn't (e.g. "Too many connections").
 pub async fn probe_mysql(port: u16) -> Probe {

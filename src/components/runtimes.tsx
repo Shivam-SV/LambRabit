@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Cloud, Code2, Database, Feather, Mail, Radio, Server, Table2, TableProperties } from "lucide-react";
+import { Cloud, Code2, Cpu, Database, Feather, Mail, Radio, Server, Table2, TableProperties, Zap } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -33,6 +33,16 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-teal-500/10 text-teal-500",
     text: "text-teal-500",
     icon: (size) => <Table2 size={size} strokeWidth={1.75} />,
+  },
+  redis: {
+    className: "bg-red-500/10 text-red-500",
+    text: "text-red-500",
+    icon: (size) => <Zap size={size} strokeWidth={1.75} />,
+  },
+  dotnet: {
+    className: "bg-purple-500/10 text-purple-500",
+    text: "text-purple-500",
+    icon: (size) => <Cpu size={size} strokeWidth={1.75} />,
   },
   ngrok: {
     className: "bg-violet-500/10 text-violet-500",

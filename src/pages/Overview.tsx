@@ -19,6 +19,8 @@ import {
   SunMedium,
   TerminalSquare,
   Activity as Pulse,
+  Zap,
+  Layers3,
   Mail,
   Table2,
 } from "lucide-react";
@@ -55,6 +57,8 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
   mariadb: { icon: Database, tile: "bg-amber-600/12 text-amber-600", blurb: "Database server for your local sites" },
   nginx: { icon: ServerIcon, tile: "bg-emerald-600/10 text-emerald-600", blurb: "Fast web server for your local sites" },
   mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
+  redis: { icon: Zap, tile: "bg-red-500/10 text-red-500", blurb: "Redis-compatible cache (Garnet)" },
+  memcached: { icon: Layers3, tile: "bg-teal-500/10 text-teal-600", blurb: "Memory cache for sessions and queries" },
 };
 
 export default function Overview() {
@@ -140,7 +144,7 @@ export default function Overview() {
       <section className="grid gap-5 md:grid-cols-2">
         {services.data
           // Optional services only appear once installed; web servers when enabled in Settings.
-          ?.filter((s) => (s.kind !== "mailpit" || s.installed) && serverEnabled(s.kind, settings.data?.webServer))
+          ?.filter((s) => (!optional.includes(s.kind) || s.installed) && serverEnabled(s.kind, settings.data?.webServer))
           .map((s) => <ServiceCard key={s.kind} service={s} now={now} sites={sites.data} mailUi={mailUi} />)}
       </section>
 
@@ -318,6 +322,9 @@ function ServiceCard({
     </Card>
   );
 }
+
+/** Services shown on Overview only once installed. */
+const optional: ServiceKind[] = ["mailpit", "redis", "memcached"];
 
 function serverEnabled(kind: ServiceKind, mode: WebServer | undefined) {
   if (kind === "apache") return mode !== "nginx";

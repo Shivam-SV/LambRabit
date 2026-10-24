@@ -14,6 +14,8 @@ const services: { id: LogService | "all"; label: string }[] = [
   { id: "php", label: "PHP" },
   { id: "mariadb", label: "MariaDB" },
   { id: "mailpit", label: "Mailpit" },
+  { id: "redis", label: "Redis" },
+  { id: "memcached", label: "Memcached" },
   { id: "system", label: "System" },
 ];
 
@@ -23,6 +25,8 @@ const badge: Record<LogService, { label: string; className: string }> = {
   php: { label: "PHP", className: "bg-indigo-500/25 text-indigo-300" },
   mariadb: { label: "MariaDB", className: "bg-amber-500/20 text-amber-300" },
   mailpit: { label: "Mailpit", className: "bg-sky-500/20 text-sky-300" },
+  redis: { label: "Redis", className: "bg-red-500/20 text-red-300" },
+  memcached: { label: "Memcached", className: "bg-teal-500/20 text-teal-300" },
   system: { label: "System", className: "bg-emerald-500/15 text-emerald-300" },
 };
 

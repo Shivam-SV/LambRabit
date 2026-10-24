@@ -114,8 +114,11 @@ Install either or both from Services. They're served at `phpmyadmin.test` and `a
 ### Command-line client (Available; Windows)
 Open the MariaDB client in a terminal, already connected, from the MariaDB card's menu.
 
-### Coming soon
-- **Redis and Memcached**: install and run them where supported. Redis and Memcached have no official Windows builds, so on Windows lampRabit offers a Redis-compatible server (such as Garnet) or explains the limitation; on macOS and Linux it manages a package-manager install. PHP extensions are offered only where builds exist for your PHP version.
+### Redis (Available)
+A Redis-compatible server on every platform: Microsoft's Garnet, installed from Services together with a private .NET runtime (nothing is installed system-wide). It runs on port 6379 with health checks and logs like every other service. Data is kept in memory, which suits caches, sessions and queues in development. PHP apps can use it through Predis today; the phpredis extension arrives with the PHP extension manager.
+
+### Memcached (Available on macOS and Linux)
+lampRabit runs the `memcached` installed on your system (`brew install memcached` or `apt install memcached`). There are no maintained Memcached builds for Windows, so on Windows lampRabit explains this and suggests Redis instead.
 
 ---
 

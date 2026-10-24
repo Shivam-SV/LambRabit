@@ -31,10 +31,14 @@ pub enum Runtime {
     /// Public tunnels for sharing sites.
     Ngrok,
     Cloudflared,
+    /// Redis-compatible server (Microsoft Garnet).
+    Redis,
+    /// Private .NET runtime that Garnet runs on; installed with Redis, not shown on its own.
+    Dotnet,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 9] = [
+    pub const ALL: [Runtime; 11] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -44,6 +48,8 @@ impl Runtime {
         Runtime::Phpmyadmin,
         Runtime::Ngrok,
         Runtime::Cloudflared,
+        Runtime::Redis,
+        Runtime::Dotnet,
     ];
 
     pub fn id(self) -> &'static str {
@@ -57,6 +63,8 @@ impl Runtime {
             Self::Phpmyadmin => "phpmyadmin",
             Self::Ngrok => "ngrok",
             Self::Cloudflared => "cloudflared",
+            Self::Redis => "redis",
+            Self::Dotnet => "dotnet",
         }
     }
 
@@ -73,6 +81,8 @@ impl Runtime {
             Self::Phpmyadmin => PathBuf::from("index.php"),
             Self::Ngrok => PathBuf::from(exe("ngrok")),
             Self::Cloudflared => PathBuf::from(exe("cloudflared")),
+            Self::Redis => PathBuf::from(exe("GarnetServer")),
+            Self::Dotnet => PathBuf::from(exe("dotnet")),
         }
     }
 }
@@ -82,6 +92,7 @@ impl Runtime {
 pub enum Archive {
     Zip,
     TarGz,
+    TarXz,
     /// A single file, saved as the runtime's marker file.
     File,
 }
@@ -93,6 +104,9 @@ pub struct Release {
     pub version: String,
     pub url: String,
     pub sha256: Option<String>,
+    /// Some publishers (Microsoft .NET) only give SHA-512.
+    #[serde(default)]
+    pub sha512: Option<String>,
     pub archive: Archive,
     /// Short note shown next to the version, e.g. "LTS".
     pub label: Option<String>,
@@ -129,6 +143,8 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
         Runtime::Cloudflared => cloudflared_releases(client).await?,
+        Runtime::Redis => garnet_releases(client).await?,
+        Runtime::Dotnet => dotnet_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -171,6 +187,7 @@ async fn php_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             version: version.to_string(),
             url: format!("{BASE}{path}"),
             sha256: build["zip"]["sha256"].as_str().map(str::to_string),
+            sha512: None,
             archive: Archive::Zip,
             label: None,
         });
@@ -220,7 +237,7 @@ async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     };
 
     let label = file.split('-').find(|p| p.starts_with("VS")).map(|vs| vs.trim_end_matches(".zip").to_string());
-    Ok(vec![Release { runtime: Runtime::Apache, version, url, sha256, archive: Archive::Zip, label }])
+    Ok(vec![Release { runtime: Runtime::Apache, version, url, sha256, sha512: None, archive: Archive::Zip, label }])
 }
 
 /// The MariaDB REST API lists stable series and the files of their latest release.
@@ -271,6 +288,7 @@ async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             version: release["release_id"].as_str()?.to_string(),
             url: file["file_download_url"].as_str()?.replacen("http://", "https://", 1),
             sha256: file["checksum"]["sha256sum"].as_str().map(str::to_string),
+            sha512: None,
             archive,
             label,
         })
@@ -315,6 +333,7 @@ async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             version: version.to_string(),
             url: format!("{SITE}{href}"),
             sha256: None,
+            sha512: None,
             archive: Archive::Zip,
             label,
         });
@@ -362,6 +381,7 @@ async fn github_latest(
         runtime,
         url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
         sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+        sha512: None,
         version,
         archive,
         label: None,
@@ -395,6 +415,7 @@ fn ngrok_releases() -> Vec<Release> {
         version: "3-stable".into(),
         url: format!("https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-{os}-{arch}.{ext}"),
         sha256: None,
+        sha512: None,
         archive,
         label: Some("Stable channel".into()),
     }]
@@ -408,6 +429,51 @@ async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> 
         _ => (format!("cloudflared-linux-{arch}"), Archive::File),
     };
     github_latest(client, Runtime::Cloudflared, "cloudflare/cloudflared", archive, |n, _| n == name).await
+}
+
+/// Garnet: Microsoft's Redis-compatible server. Its builds need the .NET runtime, which
+/// lampRabit installs privately next to it (see `dotnet_releases`).
+async fn garnet_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    let (name, archive) = match std::env::consts::OS {
+        "windows" => (format!("win-{arch}-based-readytorun.zip"), Archive::Zip),
+        "macos" => (format!("osx-{arch}-based.tar.xz"), Archive::TarXz),
+        _ => (format!("linux-{arch}-based.tar.xz"), Archive::TarXz),
+    };
+    let mut releases = github_latest(client, Runtime::Redis, "microsoft/garnet", archive, |n, _| n == name).await?;
+    for r in &mut releases {
+        r.label = Some("Garnet".into());
+    }
+    Ok(releases)
+}
+
+/// The .NET release line Garnet's current builds target (their folder is `net10.0`).
+pub const DOTNET_CHANNEL: &str = "10.0";
+
+async fn dotnet_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let meta = get_json(client, &format!("https://builds.dotnet.microsoft.com/dotnet/release-metadata/{DOTNET_CHANNEL}/releases.json")).await?;
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
+    let (rid, ext, archive) = match std::env::consts::OS {
+        "windows" => (format!("win-{arch}"), ".zip", Archive::Zip),
+        "macos" => (format!("osx-{arch}"), ".tar.gz", Archive::TarGz),
+        _ => (format!("linux-{arch}"), ".tar.gz", Archive::TarGz),
+    };
+    let release = &meta["releases"][0];
+    let file = release["runtime"]["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|f| f["rid"] == rid.as_str() && f["name"].as_str().is_some_and(|n| n.contains("dotnet-runtime") && n.ends_with(ext)))
+        .ok_or_else(|| Error::msg(format!("no .NET runtime download for {rid}")))?;
+    Ok(vec![Release {
+        runtime: Runtime::Dotnet,
+        version: release["runtime"]["version"].as_str().unwrap_or_default().to_string(),
+        url: file["url"].as_str().unwrap_or_default().to_string(),
+        sha256: None,
+        sha512: file["hash"].as_str().map(str::to_string),
+        archive,
+        label: None,
+    }])
 }
 
 async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -439,6 +505,7 @@ async fn phpmyadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
         version: version.to_string(),
         url,
         sha256,
+        sha512: None,
         archive: Archive::Zip,
         label: php,
     }])
@@ -490,6 +557,7 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         let total = response.content_length();
         let mut file = tokio::fs::File::create(&archive_path).await?;
         let mut hasher = Sha256::new();
+        let mut hasher512 = sha2::Sha512::new();
         let mut downloaded = 0u64;
         let mut last_emit = Instant::now();
         let mut stream = response.bytes_stream();
@@ -497,6 +565,7 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(http)?;
             hasher.update(&chunk);
+            hasher512.update(&chunk);
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
             if last_emit.elapsed() > Duration::from_millis(150) {
@@ -508,10 +577,13 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         drop(file);
 
         progress("verifying", downloaded, total);
-        if let Some(expected) = &release.sha256 {
-            let actual: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
-            if !actual.eq_ignore_ascii_case(expected) {
-                return Err(Error::msg(format!("checksum mismatch for {name}: download is corrupt")));
+        let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let checks = [(&release.sha256, hex(&hasher.finalize())), (&release.sha512, hex(&hasher512.finalize()))];
+        for (expected, actual) in checks {
+            if let Some(expected) = expected {
+                if !actual.eq_ignore_ascii_case(expected) {
+                    return Err(Error::msg(format!("checksum mismatch for {name}: download is corrupt")));
+                }
             }
         }
 
@@ -556,6 +628,12 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
             .and_then(|mut z| z.extract(scratch))
             .map_err(|e| Error::msg(format!("could not extract archive: {e}")))?,
         Archive::TarGz => tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(scratch)?,
+        Archive::TarXz => {
+            let mut tar_bytes = Vec::new();
+            lzma_rs::xz_decompress(&mut std::io::BufReader::new(file), &mut tar_bytes)
+                .map_err(|e| Error::msg(format!("could not decompress archive: {e}")))?;
+            tar::Archive::new(std::io::Cursor::new(tar_bytes)).unpack(scratch)?
+        }
     }
 
     // Archives wrap their content differently (Apache24/, mariadb-x.y-winx64/, or nothing);

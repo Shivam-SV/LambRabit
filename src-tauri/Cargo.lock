@@ -2136,6 +2136,7 @@ dependencies = [
  "futures-util",
  "keyring",
  "libc",
+ "lzma-rs",
  "rcgen",
  "reqwest 0.12.28",
  "serde",

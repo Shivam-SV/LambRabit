@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsString, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -33,11 +33,15 @@ pub enum ServiceKind {
     Mariadb,
     /// Catches outgoing mail (SMTP) and shows it in a web inbox.
     Mailpit,
+    /// Redis-compatible cache (Garnet).
+    Redis,
+    /// Memcached from the system (macOS/Linux).
+    Memcached,
 }
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        vec![Self::Apache, Self::Nginx, Self::Mariadb, Self::Mailpit]
+        vec![Self::Apache, Self::Nginx, Self::Mariadb, Self::Mailpit, Self::Redis, Self::Memcached]
     }
 
     pub fn web_server(self) -> Option<Server> {
@@ -59,6 +63,8 @@ impl ServiceKind {
             Self::Nginx => "nginx",
             Self::Mariadb => "mariadb",
             Self::Mailpit => "mailpit",
+            Self::Redis => "redis",
+            Self::Memcached => "memcached",
         }
     }
 
@@ -68,6 +74,8 @@ impl ServiceKind {
             Self::Nginx => "Nginx",
             Self::Mariadb => "MariaDB",
             Self::Mailpit => "Mailpit",
+            Self::Redis => "Redis",
+            Self::Memcached => "Memcached",
         }
     }
 
@@ -77,6 +85,8 @@ impl ServiceKind {
             Self::Nginx => "nginx",
             Self::Mariadb => "mariadb",
             Self::Mailpit => "mailpit",
+            Self::Redis => "redis",
+            Self::Memcached => "memcached",
         }
     }
 
@@ -86,6 +96,8 @@ impl ServiceKind {
             Self::Nginx => settings.versions.nginx.clone(),
             Self::Mariadb => settings.versions.mariadb.clone(),
             Self::Mailpit => settings.versions.mailpit.clone(),
+            Self::Redis => settings.versions.redis.clone(),
+            Self::Memcached => system_memcached().map(|(_, v)| v),
         }
     }
 
@@ -94,8 +106,10 @@ impl ServiceKind {
             Self::Apache => layout.etc("apache").join("httpd.conf"),
             Self::Nginx => layout.etc("nginx").join("nginx.conf"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
-            // Mailpit is configured on the command line; its data lives here.
+            // Configured on the command line; their data folders.
             Self::Mailpit => layout.data("mailpit"),
+            Self::Redis => layout.data("redis"),
+            Self::Memcached => layout.data("memcached"),
         }
     }
 
@@ -106,6 +120,8 @@ impl ServiceKind {
             Self::Nginx => "nginx-error.log",
             Self::Mariadb => "mariadb-error.log",
             Self::Mailpit => "mailpit-output.log",
+            Self::Redis => "redis-output.log",
+            Self::Memcached => "memcached-output.log",
         };
         layout.logs().join(file)
     }
@@ -116,6 +132,8 @@ impl ServiceKind {
             Self::Nginx => settings.server_ports(Server::Nginx).0,
             Self::Mariadb => settings.ports.mysql,
             Self::Mailpit => settings.ports.mail_smtp,
+            Self::Redis => settings.ports.redis,
+            Self::Memcached => settings.ports.memcached,
         }
     }
 }
@@ -176,9 +194,43 @@ struct LaunchSpec {
     path_prepend: Vec<PathBuf>,
     /// Command that asks the service to shut down cleanly.
     stop_cmd: Option<(PathBuf, Vec<String>)>,
+    env: Vec<(&'static str, String)>,
+}
+
+/// Memcached isn't downloadable (no maintained builds for Windows; macOS/Linux users
+/// install it with their package manager), so an installed `memcached` is used.
+pub fn system_memcached() -> Option<(PathBuf, String)> {
+    if cfg!(windows) {
+        return None;
+    }
+    let path = std::env::var_os("PATH")?;
+    let bin = std::env::split_paths(&path)
+        .chain(["/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into()])
+        .map(|d| d.join("memcached"))
+        .find(|p| p.exists())?;
+    let out = std::process::Command::new(&bin).arg("-V").output().ok()?;
+    let version = String::from_utf8_lossy(&out.stdout).split_whitespace().nth(1).unwrap_or("system").to_string();
+    Some((bin, version))
 }
 
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
+    if kind == ServiceKind::Memcached {
+        let (bin, _) = system_memcached().ok_or_else(|| {
+            Error::msg(if cfg!(windows) {
+                "Memcached has no maintained Windows builds."
+            } else {
+                "Install memcached with your package manager (brew install memcached / apt install memcached)."
+            })
+        })?;
+        return Ok(LaunchSpec {
+            cwd: bin.parent().unwrap_or(Path::new("/")).to_path_buf(),
+            program: bin,
+            args: vec!["-l".into(), "127.0.0.1".into(), "-p".into(), settings.ports.memcached.to_string(), "-m".into(), "128".into()],
+            path_prepend: vec![],
+            stop_cmd: None,
+            env: vec![],
+        });
+    }
     let version = kind
         .version(settings)
         .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
@@ -197,6 +249,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             cwd: home,
             path_prepend: vec![],
             stop_cmd: None,
+            env: vec![],
         },
         ServiceKind::Nginx => {
             let prefix = format!("{}/", path(layout.tmp().join("nginx")));
@@ -207,6 +260,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 stop_cmd: Some((home.join(exe("nginx")), vec!["-p".into(), prefix, "-c".into(), conf, "-s".into(), "quit".into()])),
                 cwd: home,
                 path_prepend: vec![],
+                env: vec![],
             }
         }
         ServiceKind::Mariadb => {
@@ -221,6 +275,7 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 )),
                 cwd: home,
                 path_prepend: vec![],
+                env: vec![],
             }
         }
         ServiceKind::Mailpit => LaunchSpec {
@@ -239,7 +294,30 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             cwd: home,
             path_prepend: vec![],
             stop_cmd: None,
+            env: vec![],
         },
+        ServiceKind::Redis => {
+            let dotnet = settings
+                .versions
+                .dotnet
+                .as_ref()
+                .map(|v| layout.bin("dotnet", v))
+                .ok_or_else(|| Error::msg("Redis needs the .NET runtime; reinstall Redis from Services to add it."))?;
+            LaunchSpec {
+                program: home.join(exe("GarnetServer")),
+                args: vec![
+                    "--bind".into(),
+                    "127.0.0.1".into(),
+                    "--port".into(),
+                    settings.ports.redis.to_string(),
+                ],
+                cwd: home,
+                path_prepend: vec![],
+                stop_cmd: None,
+                env: vec![("DOTNET_ROOT", path(dotnet))],
+            }
+        }
+        ServiceKind::Memcached => unreachable!("handled above"),
     };
     Ok(spec)
 }
@@ -271,8 +349,8 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             configs::init_mariadb_data(settings, layout).await?;
             Ok(vec![])
         }
-        ServiceKind::Mailpit => {
-            std::fs::create_dir_all(layout.data("mailpit"))?;
+        ServiceKind::Mailpit | ServiceKind::Redis | ServiceKind::Memcached => {
+            std::fs::create_dir_all(kind.config_path(layout))?;
             Ok(vec![])
         }
     }
@@ -441,6 +519,8 @@ impl Supervisor {
                 ServiceKind::Mailpit => {
                     diagnose::probe_http(client, &format!("http://127.0.0.1:{}/livez", settings.ports.mail_ui)).await
                 }
+                ServiceKind::Redis => diagnose::probe_line(settings.ports.redis, b"PING\r\n", "+PONG").await,
+                ServiceKind::Memcached => diagnose::probe_line(settings.ports.memcached, b"version\r\n", "VERSION").await,
             };
             let young = now_ms().saturating_sub(started_at) < 8_000;
             let changed = {
@@ -585,6 +665,9 @@ impl Supervisor {
             let existing = std::env::var_os("PATH").unwrap_or_default();
             let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
             cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
+        }
+        for (k, v) in &spec.env {
+            cmd.env(k, v);
         }
         procgroup::prepare(&mut cmd);
 

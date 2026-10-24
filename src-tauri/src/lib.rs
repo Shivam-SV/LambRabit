@@ -63,6 +63,8 @@ fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<Stri
         Runtime::Phpmyadmin => &mut settings.versions.phpmyadmin,
         Runtime::Ngrok => &mut settings.versions.ngrok,
         Runtime::Cloudflared => &mut settings.versions.cloudflared,
+        Runtime::Redis => &mut settings.versions.redis,
+        Runtime::Dotnet => &mut settings.versions.dotnet,
     }
 }
 
@@ -79,6 +81,7 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Adminer | Runtime::Phpmyadmin => &[ServiceKind::Apache],
         // Tunnels start on demand; nothing to restart.
         Runtime::Ngrok | Runtime::Cloudflared => &[],
+        Runtime::Redis | Runtime::Dotnet => &[ServiceKind::Redis],
     }
 }
 
@@ -142,7 +145,13 @@ async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings:
 fn check_ports(settings: &Settings) -> Result<()> {
     use config::Server;
     let p = &settings.ports;
-    let mut used: Vec<(u16, String)> = vec![(p.mysql, "MariaDB".into()), (p.mail_smtp, "Mailpit SMTP".into()), (p.mail_ui, "Mailpit inbox".into())];
+    let mut used: Vec<(u16, String)> = vec![
+        (p.mysql, "MariaDB".into()),
+        (p.mail_smtp, "Mailpit SMTP".into()),
+        (p.mail_ui, "Mailpit inbox".into()),
+        (p.redis, "Redis".into()),
+        (p.memcached, "Memcached".into()),
+    ];
     for server in [Server::Apache, Server::Nginx] {
         if settings.server_enabled(server) {
             let (http, https) = settings.server_ports(server);
@@ -571,7 +580,7 @@ struct PortStatus {
 async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm)];
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached)];
     if settings.web_server == config::WebServer::Both {
         ports.extend([("nginxHttp", p.nginx_http), ("nginxHttps", p.nginx_https)]);
     }
@@ -823,6 +832,17 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
             }
         })
         .await?;
+    // Garnet (Redis) runs on .NET; install the runtime privately the first time.
+    if release.runtime == Runtime::Redis && state.settings.read().await.versions.dotnet.is_none() {
+        let dotnet = runtimes::available(&state.http, Runtime::Dotnet)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::msg("Couldn't find a .NET runtime download"))?;
+        logs::system(&app, logs::Level::Info, format!("Installing the .NET {} runtime for Redis", dotnet.version));
+        runtimes::install(&app, &state.http, &layout, &dotnet).await?;
+        state.update_settings(|s| s.versions.dotnet = Some(dotnet.version.clone())).await?;
+    }
     // A new tool brings a domain and, for Mailpit, PHP mail settings: Apache picks both up on restart.
     if activated && is_tool(release.runtime) {
         restart_if_running(&app, &state, ServiceKind::Apache).await?;

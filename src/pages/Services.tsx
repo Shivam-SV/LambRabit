@@ -19,6 +19,7 @@ import { toolUrl } from "../lib/tools";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, Card, IconTile, PageHeader } from "../components/ui";
 import NodeCard from "../components/NodeCard";
+import MemcachedCard from "../components/MemcachedCard";
 
 const roles: Record<Runtime, { blurb: string; source: string }> = {
   apache: { blurb: "Serves your sites", source: "Apache Lounge builds" },
@@ -29,6 +30,8 @@ const roles: Record<Runtime, { blurb: string; source: string }> = {
   adminer: { blurb: "Database admin", source: "A single-file database manager" },
   phpmyadmin: { blurb: "Database admin", source: "The classic MySQL/MariaDB web interface" },
   ngrok: { blurb: "Public tunnels", source: "Share sites on a public URL (free account needed)" },
+  redis: { blurb: "Cache and queues", source: "Microsoft Garnet, Redis-compatible; runs on a private .NET runtime installed with it" },
+  dotnet: { blurb: "Runtime", source: "Used by Redis (Garnet)" },
   cloudflared: { blurb: "Public tunnels", source: "Cloudflare quick tunnels, no account needed" },
 };
 
@@ -67,6 +70,7 @@ export default function Services() {
           </p>
         </div>
         <NodeCard />
+        <MemcachedCard />
         {toolRuntimes.map((r) => (
           <RuntimeRail
             key={r}
