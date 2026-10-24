@@ -39,6 +39,8 @@ pub struct Site {
     /// PHP version chosen for this site; None means the active version.
     pub php: Option<String>,
     pub server: Server,
+    /// Node version from the project's .nvmrc / .node-version.
+    pub node: Option<String>,
 }
 
 /// Folder name → DNS label: lowercase letters, digits and dashes.
@@ -105,6 +107,7 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
             proxy,
             php: None,
             server,
+            node: None,
         });
     };
     if let Some(ver) = &v.adminer {
@@ -146,6 +149,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             let ssl = own.and_then(|s| s.ssl).unwrap_or(settings.https_by_default);
             let php = own.and_then(|s| s.php.clone());
             let server = site_server(settings, &name);
+            let node = crate::node::project_version(&path);
             let modified = e
                 .metadata()
                 .and_then(|m| m.modified())
@@ -164,6 +168,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 proxy: None,
                 php,
                 server,
+                node,
             })
         })
         .collect();
@@ -550,6 +555,7 @@ mod tests {
             proxy: None,
             php: None,
             server: Server::Apache,
+            node: None,
         }
     }
 

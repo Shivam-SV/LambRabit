@@ -131,7 +131,8 @@ PHP's `mail()` is pointed at Mailpit for you (Windows: php.ini SMTP settings; ma
 
 ## 6. Developer tools and runtimes (Coming soon)
 
-- **Node.js through NVM**: install NVM when you ask for it (not by default), then install and switch Node versions from lampRabit. Projects with an `.nvmrc` get the right version. Windows uses nvm-windows (which needs administrator rights or Developer Mode to switch versions; lampRabit tells you before installing); macOS and Linux use the official nvm. An existing NVM installation is detected and reused.
+### Node.js through NVM (Available)
+lampRabit manages Node.js versions through NVM. If you already use NVM it's detected and reused; otherwise it's installed only when you ask (Windows: the official nvm-windows installer, with one administrator prompt; macOS and Linux: the official nvm script). Install, switch the default and remove Node versions from Services, with LTS releases labelled. Sites show the Node version their `.nvmrc` asks for, and warn if it isn't installed. On Windows, switching versions needs administrator approval unless Developer Mode is on; lampRabit tells you which applies.
 - **Tunnels** are available now; see "Share a site on the internet" under Sites.
 
 ---

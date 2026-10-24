@@ -184,6 +184,7 @@ function SiteCard({ site }: { site: Site }) {
   const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
   const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
   const tunnel = useTunnels().data?.find((t) => t.site === site.name);
+  const node = useQuery({ queryKey: ["node"], queryFn: api.nodeStatus, enabled: !!site.node });
   const servesPublic = site.docroot !== site.path;
 
   return (
@@ -206,6 +207,14 @@ function SiteCard({ site }: { site: Site }) {
           {site.path}
         </div>
         {servesPublic && <div className="mt-0.5 text-xs">Serving the public/ folder</div>}
+        {site.node && (
+          <div className="mt-1 text-xs" title="From the project's .nvmrc">
+            Node {site.node}
+            {node.data?.manager && !node.data.installed.some((v) => v === site.node || v.startsWith(`${site.node}.`)) && (
+              <span className="text-warn"> · not installed (Services → Node.js)</span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className={clsx("divide-y divide-line rounded-xl bg-surface-2 text-sm", busy && "opacity-60")}>

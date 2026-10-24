@@ -18,6 +18,7 @@ import { installKey, useAppStore } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, Card, IconTile, PageHeader } from "../components/ui";
+import NodeCard from "../components/NodeCard";
 
 const roles: Record<Runtime, { blurb: string; source: string }> = {
   apache: { blurb: "Serves your sites", source: "Apache Lounge builds" },
@@ -65,6 +66,7 @@ export default function Services() {
             Optional extras. Database tools are served by Apache; Mailpit runs as its own service.
           </p>
         </div>
+        <NodeCard />
         {toolRuntimes.map((r) => (
           <RuntimeRail
             key={r}

@@ -131,6 +131,22 @@ export interface Site {
   /** PHP version chosen for the site; null follows the active version. */
   php: string | null;
   server: Server;
+  /** Node version from the project's .nvmrc / .node-version. */
+  node: string | null;
+}
+
+export interface NodeStatus {
+  manager: "nvm-windows" | "nvm" | null;
+  managerVersion: string | null;
+  current: string | null;
+  installed: string[];
+  needsElevation: boolean;
+}
+
+export interface NodeRelease {
+  version: string;
+  major: number;
+  lts: string | null;
 }
 
 export type Preset = "blank" | "static" | "laravel" | "symfony" | "wordpress";
@@ -240,6 +256,12 @@ export const api = {
   tunnelStop: (id: string) => invoke<void>("tunnel_stop", { id }),
   tunnelList: () => invoke<Tunnel[]>("tunnel_list"),
   ngrokTokenSaved: () => invoke<boolean>("ngrok_token_saved"),
+  nodeStatus: () => invoke<NodeStatus>("node_status"),
+  nodeAvailable: () => invoke<NodeRelease[]>("node_available"),
+  nodeInstall: (version: string) => invoke<void>("node_install", { version }),
+  nodeUse: (version: string) => invoke<void>("node_use", { version }),
+  nodeUninstall: (version: string) => invoke<void>("node_uninstall", { version }),
+  nvmInstall: () => invoke<void>("nvm_install"),
   setNgrokToken: (token: string | null) => invoke<void>("set_ngrok_token", { token }),
   trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),

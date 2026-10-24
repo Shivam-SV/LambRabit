@@ -4,6 +4,7 @@ mod diagnose;
 mod error;
 mod layout;
 mod logs;
+mod node;
 mod php;
 mod procgroup;
 mod projects;
@@ -458,6 +459,37 @@ fn set_ngrok_token(app: AppHandle, token: Option<String>) -> Result<()> {
     tunnels::set_ngrok_token(token.as_deref())?;
     logs::system(&app, logs::Level::Info, if token.is_some() { "Ngrok authtoken saved to the keychain" } else { "Ngrok authtoken removed" });
     Ok(())
+}
+
+#[tauri::command]
+async fn node_status(app: AppHandle) -> Result<node::NodeStatus> {
+    Ok(node::status(&app).await)
+}
+
+#[tauri::command]
+async fn node_available(state: State<'_, AppState>) -> Result<Vec<node::NodeRelease>> {
+    node::available(&state.http).await
+}
+
+#[tauri::command]
+async fn node_install(app: AppHandle, version: String) -> Result<()> {
+    node::install_version(&app, &version).await
+}
+
+#[tauri::command]
+async fn node_use(app: AppHandle, version: String) -> Result<()> {
+    node::use_version(&app, &version).await
+}
+
+#[tauri::command]
+async fn node_uninstall(app: AppHandle, version: String) -> Result<()> {
+    node::uninstall_version(&app, &version).await
+}
+
+#[tauri::command]
+async fn nvm_install(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    node::install_nvm(&app, &state.http, &layout).await
 }
 
 #[tauri::command]
@@ -940,6 +972,12 @@ pub fn run() {
             set_site_server,
             php_status,
             create_project,
+            node_status,
+            node_available,
+            node_install,
+            node_use,
+            node_uninstall,
+            nvm_install,
             tunnel_start,
             tunnel_stop,
             tunnel_list,
