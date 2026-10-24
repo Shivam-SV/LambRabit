@@ -21,13 +21,13 @@ jobs:
             args: ""
           - platform: macos-latest # Apple Silicon
             args: "--target aarch64-apple-darwin"
-          - platform: macos-13 # Intel
+          - platform: macos-latest # Intel, cross-compiled
             args: "--target x86_64-apple-darwin"
           - platform: ubuntu-22.04
             args: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Linux system libraries
         if: runner.os == 'Linux'
         run: |
@@ -39,7 +39,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm

@@ -566,7 +566,9 @@ mod tests {
         current.extend_from_slice(format!("{HOSTS_BEGIN}\r\n127.0.0.1\told.test\r\n{HOSTS_END}\r\n").as_bytes());
         let out = render_hosts(&current, &[site("new.test")]);
         let text = String::from_utf8_lossy(&out);
-        assert!(out.windows(6).any(|w| w == b"caf\xe9\r\n"));
+        // Lines come back with the platform's line ending.
+        let expected: &[u8] = if cfg!(windows) { b"caf\xe9\r\n" } else { b"caf\xe9\n" };
+        assert!(out.windows(expected.len()).any(|w| w == expected));
         assert!(text.contains("0.0.0.0 blocked.example"));
         assert!(text.contains("127.0.0.1\tnew.test"));
         assert!(!text.contains("old.test"));
