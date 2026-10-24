@@ -13,10 +13,11 @@
     "windows": [
       {
         "title": "lampRabit",
-        "width": 1100,
-        "height": 720,
-        "minWidth": 860,
-        "minHeight": 560
+        "width": 1280,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {

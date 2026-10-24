@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Code2, Database, Download, Feather, RefreshCw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { api, type InstalledRuntime, type Release, type Runtime } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
@@ -12,14 +12,20 @@ const runtimes: { id: Runtime; label: string; blurb: string }[] = [
   { id: "mariadb", label: "MariaDB", blurb: "MySQL-compatible database server" },
 ];
 
-const stageLabel = { downloading: "Downloading", verifying: "Verifying", extracting: "Extracting" } as const;
+const tiles: Record<Runtime, { className: string; icon: React.ReactNode }> = {
+  apache: { className: "bg-rose-500/10 text-rose-500", icon: <Feather size={22} strokeWidth={1.75} /> },
+  php: { className: "bg-indigo-500/10 text-indigo-500", icon: <Code2 size={22} strokeWidth={1.75} /> },
+  mariadb: { className: "bg-amber-600/12 text-amber-600", icon: <Database size={22} strokeWidth={1.75} /> },
+};
+
+const stageLabel ={ downloading: "Downloading", verifying: "Verifying", extracting: "Extracting" } as const;
 
 export default function Versions() {
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   return (
     <>
-      <PageHeader title="Versions" />
-      <div className="space-y-4 px-8 pb-8">
+      <PageHeader title="Services" subtitle="Install, switch and remove Apache, PHP and MariaDB versions." />
+      <div className="space-y-5">
         {runtimes.map((rt) => (
           <RuntimeCard key={rt.id} {...rt} installed={installed.data?.find((i) => i.runtime === rt.id)} />
         ))}
@@ -83,10 +89,13 @@ function RuntimeCard({
   const available = (catalog.data ?? []).filter((r) => !versions.includes(r.version));
 
   return (
-    <Card className="p-5">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="font-medium">{label}</h2>
+    <Card className="p-6">
+      <div className="mb-5 flex items-start gap-4">
+        <div className={clsx("flex size-12 shrink-0 items-center justify-center rounded-xl", tiles[id].className)}>
+          {tiles[id].icon}
+        </div>
+        <div className="flex-1">
+          <h2 className="text-lg font-bold tracking-tight">{label}</h2>
           <p className="text-sm text-muted">{blurb}</p>
         </div>
         <Button onClick={() => catalog.refetch()} disabled={catalog.isFetching} title="Refresh available versions">

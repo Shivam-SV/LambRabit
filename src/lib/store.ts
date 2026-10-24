@@ -2,6 +2,9 @@ import { create } from "zustand";
 import type { InstallProgress, ServiceKind } from "./api";
 
 const MAX_LOG_LINES = 2000;
+const MAX_ACTIVITY = 100;
+
+export type PageId = "overview" | "sites" | "services" | "logs" | "settings";
 
 export interface LogLine {
   id: number;
@@ -16,16 +19,28 @@ export interface Notice {
   text: string;
 }
 
+export interface Activity {
+  id: number;
+  at: Date;
+  text: string;
+  source: string;
+  tone: "ok" | "info" | "muted" | "error";
+}
+
 export const installKey = (runtime: string, version: string) => `${runtime}@${version}`;
 
 interface AppStore {
+  page: PageId;
+  navigate: (page: PageId) => void;
   logs: LogLine[];
   notices: Notice[];
+  activity: Activity[];
   /** In-flight installs keyed by installKey(). */
   installs: Record<string, InstallProgress>;
   setInstall: (p: InstallProgress) => void;
   pushLog: (kind: ServiceKind, line: string) => void;
   clearLogs: () => void;
+  record: (text: string, source: string, tone: Activity["tone"]) => void;
   notify: (tone: Notice["tone"], text: string) => void;
   dismiss: (id: number) => void;
 }
@@ -33,8 +48,11 @@ interface AppStore {
 let nextId = 1;
 
 export const useAppStore = create<AppStore>((set) => ({
+  page: "overview",
+  navigate: (page) => set({ page }),
   logs: [],
   notices: [],
+  activity: [{ id: nextId++, at: new Date(), text: "Environment ready", source: "System", tone: "info" }],
   installs: {},
   setInstall: (p) =>
     set((s) => {
@@ -49,6 +67,10 @@ export const useAppStore = create<AppStore>((set) => ({
       logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), { id: nextId++, kind, line, at: new Date() }],
     })),
   clearLogs: () => set({ logs: [] }),
+  record: (text, source, tone) =>
+    set((s) => ({
+      activity: [{ id: nextId++, at: new Date(), text, source, tone }, ...s.activity].slice(0, MAX_ACTIVITY),
+    })),
   notify: (tone, text) => {
     const id = nextId++;
     set((s) => ({ notices: [...s.notices, { id, tone, text }] }));

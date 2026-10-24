@@ -1,45 +1,39 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { useQueryClient } from "@tanstack/react-query";
-import { Gauge, Globe, Layers, Monitor, Moon, ScrollText, Settings as SettingsIcon, Sun } from "lucide-react";
-import clsx from "clsx";
-import type { InstallProgress, LogEvent, StatusEvent } from "./lib/api";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FolderOpen, Play, Square } from "lucide-react";
+import {
+  api,
+  runtimeLabels,
+  serviceLabels,
+  type InstallProgress,
+  type LogEvent,
+  type StatusEvent,
+} from "./lib/api";
 import { useAppStore } from "./lib/store";
-import { useTheme, type Theme } from "./lib/theme";
-import Dashboard from "./pages/Dashboard";
+import Overview from "./pages/Overview";
+import Sites from "./pages/Sites";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
-import Placeholder from "./pages/Placeholder";
 import Versions from "./pages/Versions";
 import Notices from "./components/Notices";
 import Logo from "./components/Logo";
-
-const pages = [
-  { id: "dashboard", label: "Dashboard", icon: Gauge },
-  { id: "sites", label: "Sites", icon: Globe },
-  { id: "versions", label: "Versions", icon: Layers },
-  { id: "logs", label: "Logs", icon: ScrollText },
-  { id: "settings", label: "Settings", icon: SettingsIcon },
-] as const;
-
-type PageId = (typeof pages)[number]["id"];
-
-const themes: { id: Theme; label: string; icon: typeof Sun }[] = [
-  { id: "light", label: "Light", icon: Sun },
-  { id: "system", label: "System", icon: Monitor },
-  { id: "dark", label: "Dark", icon: Moon },
-];
+import BottomNav from "./components/BottomNav";
+import { Button } from "./components/ui";
 
 function useBackendEvents() {
   const queryClient = useQueryClient();
-  const pushLog = useAppStore((s) => s.pushLog);
-  const notify = useAppStore((s) => s.notify);
-  const setInstall = useAppStore((s) => s.setInstall);
+  const { pushLog, notify, setInstall, record } = useAppStore.getState();
 
   useEffect(() => {
     const unlisten = [
       listen<StatusEvent>("service-status", ({ payload }) => {
         queryClient.invalidateQueries({ queryKey: ["services"] });
+        const label = serviceLabels[payload.kind];
+        if (payload.state === "running") record(`${label} started`, label, "ok");
+        if (payload.state === "stopped") record(`${label} stopped`, label, "muted");
+        if (payload.state === "error") record(payload.message ?? `${label} failed`, label, "error");
         if (payload.message) notify("error", payload.message);
       }),
       listen<LogEvent>("service-log", ({ payload }) => pushLog(payload.kind, payload.line)),
@@ -49,84 +43,78 @@ function useBackendEvents() {
           queryClient.invalidateQueries({ queryKey: ["installed"] });
           queryClient.invalidateQueries({ queryKey: ["services"] });
         }
+        if (payload.stage === "done") {
+          record(`${runtimeLabels[payload.runtime]} ${payload.version} installed`, "Services", "info");
+        }
       }),
     ];
     return () => unlisten.forEach((p) => p.then((off) => off()));
-  }, [queryClient, pushLog, notify, setInstall]);
+  }, [queryClient, pushLog, notify, setInstall, record]);
 }
 
-function ThemeSwitch() {
-  const { theme, setTheme } = useTheme();
+function AppHeader() {
+  const notify = useAppStore((s) => s.notify);
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
+  const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
+  const onError = (e: unknown) => notify("error", String(e));
+  const startAll = useMutation({
+    mutationFn: api.startAll,
+    onSuccess: (errors) => errors.forEach((e) => notify("error", e)),
+    onError,
+  });
+  const stopAll = useMutation({ mutationFn: api.stopAll, onError });
+  const anyRunning = services.data?.some((s) => s.state === "running");
+
   return (
-    <div className="flex rounded-md bg-surface-2 p-0.5" role="radiogroup" aria-label="Theme">
-      {themes.map(({ id, label, icon: Icon }) => (
-        <button
-          key={id}
-          role="radio"
-          aria-checked={theme === id}
-          title={label}
-          onClick={() => setTheme(id)}
-          className={clsx(
-            "flex flex-1 justify-center rounded py-1 transition-colors",
-            theme === id ? "bg-surface text-accent-text shadow-sm" : "text-muted hover:text-fg",
-          )}
-        >
-          <Icon size={14} />
-        </button>
-      ))}
-    </div>
+    <header className="flex flex-wrap items-center justify-between gap-4 pt-7 pb-8">
+      <div className="flex items-center gap-3.5">
+        <Logo className="size-12 shrink-0" />
+        <div>
+          <div className="text-xl leading-tight font-bold tracking-tight">
+            lamp<span className="text-accent-text">Rabit</span>
+          </div>
+          <div className="text-sm text-muted">Local dev environment</div>
+        </div>
+      </div>
+      <div className="flex gap-2.5">
+        <Button size="lg" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data}>
+          <FolderOpen size={18} /> Open www
+        </Button>
+        {anyRunning ? (
+          <Button size="lg" onClick={() => stopAll.mutate()} disabled={stopAll.isPending}>
+            <Square size={15} className="fill-current" /> Stop all
+          </Button>
+        ) : (
+          <Button size="lg" variant="primary" onClick={() => startAll.mutate()} disabled={startAll.isPending}>
+            <Play size={17} /> Start all
+          </Button>
+        )}
+      </div>
+    </header>
   );
 }
 
 export default function App() {
-  const [page, setPage] = useState<PageId>("dashboard");
+  const page = useAppStore((s) => s.page);
+  const scroller = useRef<HTMLDivElement>(null);
   useBackendEvents();
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 });
+  }, [page]);
 
   return (
-    <div className="flex h-full">
-      <nav className="flex w-52 shrink-0 flex-col border-r border-line bg-surface px-3 py-4">
-        <div className="mb-6 flex items-center gap-2.5 px-2">
-          <Logo className="size-9 shrink-0" />
-          <div>
-            <div className="font-semibold tracking-tight">
-              lamp<span className="text-accent-text">Rabit</span>
-            </div>
-            <div className="text-xs text-muted">Local dev environment</div>
-          </div>
-        </div>
-        <ul className="space-y-1">
-          {pages.map(({ id, label, icon: Icon }) => (
-            <li key={id}>
-              <button
-                onClick={() => setPage(id)}
-                className={clsx(
-                  "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
-                  page === id
-                    ? "bg-accent-soft font-medium text-accent-text"
-                    : "text-muted hover:bg-surface-2 hover:text-fg",
-                )}
-              >
-                <Icon size={16} />
-                {label}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-auto px-2">
-          <ThemeSwitch />
-        </div>
-      </nav>
-
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        {page === "dashboard" && <Dashboard />}
-        {page === "sites" && (
-          <Placeholder title="Sites" phase={4} text="Folders in www/ become http(s)://name.test with local SSL." />
-        )}
-        {page === "versions" && <Versions />}
-        {page === "logs" && <Logs />}
-        {page === "settings" && <Settings />}
-      </main>
-
+    <div ref={scroller} className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-6xl px-6 pb-32 sm:px-10">
+        <AppHeader />
+        <main>
+          {page === "overview" && <Overview />}
+          {page === "sites" && <Sites />}
+          {page === "services" && <Versions />}
+          {page === "logs" && <Logs />}
+          {page === "settings" && <Settings />}
+        </main>
+      </div>
+      <BottomNav />
       <Notices />
     </div>
   );

@@ -6,7 +6,7 @@ mod procgroup;
 mod runtimes;
 mod services;
 
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use std::{collections::HashSet, path::PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent, State};
@@ -156,6 +156,77 @@ async fn stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
+async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
+    state.supervisor.stop(&app, kind).await;
+    state.supervisor.wait_stopped(kind).await;
+    let (settings, layout) = state.snapshot().await;
+    state.supervisor.start(&app, kind, &settings, &layout).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Site {
+    name: String,
+    path: PathBuf,
+    url: String,
+    /// Unix time in milliseconds of the folder's last modification.
+    modified: u64,
+}
+
+/// Every folder in www/ is a site, most recently modified first.
+#[tauri::command]
+async fn list_sites(state: State<'_, AppState>) -> Result<Vec<Site>> {
+    let (settings, layout) = state.snapshot().await;
+    let port = match settings.ports.http {
+        80 => String::new(),
+        p => format!(":{p}"),
+    };
+    let mut sites: Vec<Site> = std::fs::read_dir(layout.www())?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            if name.starts_with('.') {
+                return None;
+            }
+            let modified = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_millis() as u64);
+            // Served from the document root until per-site virtual hosts land (phase 4).
+            let url = format!("http://localhost{port}/{name}/");
+            Some(Site { path: e.path(), name, url, modified })
+        })
+        .collect();
+    sites.sort_by(|a, b| b.modified.cmp(&a.modified));
+    Ok(sites)
+}
+
+/// Opens the MariaDB command-line client in a new terminal window.
+#[tauri::command]
+async fn open_db_client(state: State<'_, AppState>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    let home = configs::mariadb_home(&settings, &layout)?;
+    let client = home.join("bin").join(layout::exe("mariadb"));
+    let defaults = format!("--defaults-file={}", layout.etc("mariadb").join("my.ini").display());
+    if cfg!(windows) {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "MariaDB"])
+            .arg(&client)
+            .args([defaults.as_str(), "--user=root"])
+            .spawn()?;
+        Ok(())
+    } else {
+        Err(Error::msg(format!(
+            "Opening a terminal is not supported on this OS yet. Run: {} {defaults} --user=root",
+            client.display()
+        )))
+    }
+}
+
+#[tauri::command]
 fn check_port(port: u16) -> bool {
     services::port_free(port)
 }
@@ -237,12 +308,7 @@ async fn set_active_version(
         }
     }
     for &kind in &restart {
-        for _ in 0..400 {
-            if !state.supervisor.is_running(kind).await {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        state.supervisor.wait_stopped(kind).await;
     }
 
     let settings = state.update_settings(|s| *active_version(s, runtime) = Some(version)).await?;
@@ -283,6 +349,9 @@ pub fn run() {
             start_all,
             stop_all,
             check_port,
+            restart_service,
+            list_sites,
+            open_db_client,
             runtime_catalog,
             installed_runtimes,
             install_runtime,

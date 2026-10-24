@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
 
 /*
  * Brand palette (from the logo): charcoal #1b2028, mint #59d1a2, white.
@@ -6,7 +7,10 @@
  * Light is the base; dark applies via system preference or data-theme="dark".
  */
 @theme {
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter Variable", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --shadow-card: var(--card-shadow);
+  --shadow-float: var(--float-shadow);
+  --color-nav: var(--nav);
   --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
 
   --color-bg: var(--bg);
@@ -48,6 +52,9 @@
   --ok: #1fa774;
   --warn: #d99a1e;
   --logo-head: #1b2028;
+  --nav: rgb(255 255 255 / 0.85);
+  --card-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.03);
+  --float-shadow: 0 8px 30px rgb(16 24 40 / 0.12), 0 2px 6px rgb(16 24 40 / 0.06);
 }
 
 :root[data-theme="dark"] {
@@ -70,6 +77,9 @@
   --ok: #59d1a2;
   --warn: #f0b84a;
   --logo-head: #3a4452;
+  --nav: rgb(27 32 40 / 0.85);
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  --float-shadow: 0 10px 30px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -93,6 +103,9 @@
     --ok: #59d1a2;
     --warn: #f0b84a;
     --logo-head: #3a4452;
+    --nav: rgb(27 32 40 / 0.85);
+    --card-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+    --float-shadow: 0 10px 30px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
   }
 }
 

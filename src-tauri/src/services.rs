@@ -70,6 +70,24 @@ impl ServiceKind {
         }
     }
 
+    pub fn config_path(self, layout: &Layout) -> PathBuf {
+        match self {
+            Self::Apache => layout.etc("apache").join("httpd.conf"),
+            Self::Mariadb => layout.etc("mariadb").join("my.ini"),
+            Self::PhpFpm => layout.etc("php").join("php-fpm.conf"),
+        }
+    }
+
+    /// The service's own error log (stdout/stderr go to `<id>.log`).
+    pub fn log_path(self, layout: &Layout) -> PathBuf {
+        let file = match self {
+            Self::Apache => "apache-error.log",
+            Self::Mariadb => "mariadb-error.log",
+            Self::PhpFpm => "php-fpm.log",
+        };
+        layout.logs().join(file)
+    }
+
     fn port(self, settings: &Settings) -> u16 {
         match self {
             Self::Apache => settings.ports.http,
@@ -99,6 +117,10 @@ pub struct ServiceInfo {
     pub port: u16,
     pub version: Option<String>,
     pub installed: bool,
+    /// Unix time in milliseconds when the service came up.
+    pub started_at: Option<u64>,
+    pub config_path: PathBuf,
+    pub log_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -198,9 +220,16 @@ pub fn port_free(port: u16) -> bool {
     TcpListener::bind(("0.0.0.0", port)).is_ok() && TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
 struct Handle {
     pid: Option<u32>,
     state: ServiceState,
+    started_at: Option<u64>,
     /// Taken when a stop has been requested.
     stop_tx: Option<oneshot::Sender<()>>,
 }
@@ -228,6 +257,9 @@ impl Supervisor {
                     port: kind.port(settings),
                     version: kind.version(settings),
                     installed,
+                    started_at: handle.and_then(|h| h.started_at),
+                    config_path: kind.config_path(layout),
+                    log_path: kind.log_path(layout),
                 }
             })
             .collect()
@@ -235,6 +267,14 @@ impl Supervisor {
 
     pub async fn is_running(&self, kind: ServiceKind) -> bool {
         self.running.lock().await.contains_key(&kind)
+    }
+
+    /// Waits until a stopping service has fully exited.
+    pub async fn wait_stopped(&self, kind: ServiceKind) {
+        let deadline = tokio::time::Instant::now() + STOP_TIMEOUT + Duration::from_secs(2);
+        while self.is_running(kind).await && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     pub async fn start(
@@ -250,7 +290,10 @@ impl Supervisor {
                 return Ok(());
             }
             // Reserve the slot so concurrent starts don't race during setup.
-            running.insert(kind, Handle { pid: None, state: ServiceState::Starting, stop_tx: None });
+            running.insert(
+                kind,
+                Handle { pid: None, state: ServiceState::Starting, started_at: None, stop_tx: None },
+            );
         }
         emit_status(app, kind, ServiceState::Starting, None);
 
@@ -311,7 +354,12 @@ impl Supervisor {
         let (stop_tx, stop_rx) = oneshot::channel();
         self.running.lock().await.insert(
             kind,
-            Handle { pid: child.id(), state: ServiceState::Running, stop_tx: Some(stop_tx) },
+            Handle {
+                pid: child.id(),
+                state: ServiceState::Running,
+                started_at: Some(now_ms()),
+                stop_tx: Some(stop_tx),
+            },
         );
         emit_status(app, kind, ServiceState::Running, None);
 

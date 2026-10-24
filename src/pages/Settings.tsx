@@ -39,15 +39,16 @@ export default function Settings() {
     <>
       <PageHeader
         title="Settings"
+        subtitle="Where lampRabit keeps things and which ports it uses."
         actions={
           <Button variant="primary" onClick={() => save.mutate(draft)} disabled={save.isPending}>
             <Save size={14} /> Save
           </Button>
         }
       />
-      <div className="max-w-2xl space-y-4 px-8 pb-8">
-        <Card className="space-y-4 p-5">
-          <h2 className="font-medium">General</h2>
+      <div className="max-w-2xl space-y-5">
+        <Card className="space-y-4 p-6">
+          <h2 className="text-lg font-bold tracking-tight">General</h2>
           <Field label="Environment root" hint="Holds runtimes, configs, www, databases and logs.">
             <input
               className={inputClass}
@@ -64,8 +65,8 @@ export default function Settings() {
           </Field>
         </Card>
 
-        <Card className="space-y-4 p-5">
-          <h2 className="font-medium">Ports</h2>
+        <Card className="space-y-4 p-6">
+          <h2 className="text-lg font-bold tracking-tight">Ports</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             {portFields.map(({ key, label }) => (
               <Field key={key} label={label}>

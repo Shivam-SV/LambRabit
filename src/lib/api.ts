@@ -4,6 +4,14 @@ export type ServiceKind = "apache" | "mariadb" | "php-fpm";
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
 export type Runtime = "apache" | "php" | "mariadb";
 
+export const serviceLabels: Record<ServiceKind, string> = {
+  apache: "Apache",
+  mariadb: "MariaDB",
+  "php-fpm": "PHP-FPM",
+};
+
+export const runtimeLabels: Record<Runtime, string> = { apache: "Apache", php: "PHP", mariadb: "MariaDB" };
+
 export interface Release {
   runtime: Runtime;
   version: string;
@@ -35,6 +43,16 @@ export interface ServiceInfo {
   port: number;
   version: string | null;
   installed: boolean;
+  startedAt: number | null;
+  configPath: string;
+  logPath: string;
+}
+
+export interface Site {
+  name: string;
+  path: string;
+  url: string;
+  modified: number;
 }
 
 export interface StatusEvent {
@@ -69,6 +87,9 @@ export const api = {
   listServices: () => invoke<ServiceInfo[]>("list_services"),
   startService: (kind: ServiceKind) => invoke<void>("start_service", { kind }),
   stopService: (kind: ServiceKind) => invoke<void>("stop_service", { kind }),
+  restartService: (kind: ServiceKind) => invoke<void>("restart_service", { kind }),
+  listSites: () => invoke<Site[]>("list_sites"),
+  openDbClient: () => invoke<void>("open_db_client"),
   startAll: () => invoke<string[]>("start_all"),
   stopAll: () => invoke<void>("stop_all"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),

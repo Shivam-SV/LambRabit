@@ -1,24 +1,34 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import clsx from "clsx";
 
-type Variant = "primary" | "secondary" | "danger";
+type Variant = "primary" | "secondary" | "soft" | "danger" | "ghost";
 
 const variants: Record<Variant, string> = {
-  primary: "bg-accent text-accent-fg hover:bg-accent-hover",
-  secondary: "border border-line bg-surface text-fg hover:bg-surface-2",
+  primary: "bg-accent text-accent-fg shadow-card hover:bg-accent-hover",
+  secondary: "border border-line bg-surface text-fg shadow-card hover:bg-surface-2",
+  soft: "bg-accent-soft text-accent-text hover:brightness-95 dark:hover:brightness-125",
   danger: "bg-danger text-white hover:bg-danger-hover",
+  ghost: "text-muted hover:bg-surface-2 hover:text-fg",
+};
+
+const sizes = {
+  sm: "h-8 gap-1.5 rounded-md px-2.5 text-sm",
+  md: "h-9 gap-2 rounded-lg px-3.5 text-sm",
+  lg: "h-11 gap-2 rounded-xl px-5 text-[15px]",
 };
 
 export function Button({
   variant = "secondary",
+  size = "md",
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: keyof typeof sizes }) {
   return (
     <button
       {...props}
       className={clsx(
-        "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        sizes[size],
         variants[variant],
         className,
       )}
@@ -26,18 +36,56 @@ export function Button({
   );
 }
 
-export function PageHeader({ title, actions }: { title: string; actions?: ReactNode }) {
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+}: {
+  title: string;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+}) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3 px-8 pt-7 pb-5">
-      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-      <div className="flex flex-wrap gap-2">{actions}</div>
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 text-muted">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </header>
   );
 }
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={clsx("rounded-xl border border-line bg-surface", className)}>{children}</div>;
+  return (
+    <div className={clsx("rounded-2xl border border-line bg-surface shadow-card", className)}>{children}</div>
+  );
+}
+
+export function Pill({ tone, children }: { tone: "ok" | "warn" | "muted" | "danger"; children: ReactNode }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+        tone === "ok" && "bg-accent-soft text-accent-text",
+        tone === "warn" && "bg-warn/15 text-warn",
+        tone === "muted" && "bg-surface-2 text-muted",
+        tone === "danger" && "bg-danger-soft text-danger-text",
+      )}
+    >
+      <span
+        className={clsx(
+          "size-1.5 rounded-full",
+          tone === "ok" && "bg-ok",
+          tone === "warn" && "animate-pulse bg-warn",
+          tone === "muted" && "bg-muted/60",
+          tone === "danger" && "bg-danger",
+        )}
+      />
+      {children}
+    </span>
+  );
 }
 
 export const inputClass =
-  "w-full rounded-md border border-line bg-bg px-2.5 py-1.5 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/25";
+  "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/25";
