@@ -255,13 +255,6 @@ pub async fn probe_http(client: &reqwest::Client, url: &str) -> Probe {
     }
 }
 
-pub async fn probe_tcp(port: u16) -> Probe {
-    match tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(("127.0.0.1", port))).await {
-        Ok(Ok(_)) => Probe::Ok,
-        _ => Probe::Bad(format!("Not accepting connections on port {port}")),
-    }
-}
-
 /// MySQL/MariaDB greet every new connection; a greeting means the server is ready,
 /// an error packet carries the reason it isn't (e.g. "Too many connections").
 pub async fn probe_mysql(port: u16) -> Probe {

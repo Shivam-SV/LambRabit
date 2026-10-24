@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, Check, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -11,6 +11,7 @@ import {
   type InstalledRuntime,
   type Release,
   type Runtime,
+  type Settings,
   type ServiceInfo,
 } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
@@ -20,6 +21,7 @@ import { Button, Card, IconTile, PageHeader } from "../components/ui";
 
 const roles: Record<Runtime, { blurb: string; source: string }> = {
   apache: { blurb: "Serves your sites", source: "Apache Lounge builds" },
+  nginx: { blurb: "Serves your sites", source: "Official nginx.org Windows builds (PGP-signed, no checksum)" },
   php: { blurb: "Runs your code", source: "Thread-safe builds from windows.php.net" },
   mariadb: { blurb: "Stores your data", source: "Official MariaDB releases" },
   mailpit: { blurb: "Catches outgoing mail", source: "Local SMTP server with a web inbox" },
@@ -50,7 +52,7 @@ export default function Services() {
     <>
       <PageHeader title="Services" subtitle="Your stack, and every version you can run it on." />
       <div className="space-y-5">
-        <StackDiagram installed={installed.data ?? []} services={services.data ?? []} />
+        <StackDiagram installed={installed.data ?? []} services={services.data ?? []} settings={settings.data} />
         {order.map((r) => (
           <RuntimeRail key={r} runtime={r} installed={find(r)} />
         ))}
@@ -74,24 +76,70 @@ export default function Services() {
   );
 }
 
-/** Apache → PHP → MariaDB as connected nodes; the links animate while traffic can flow. */
-function StackDiagram({ installed, services }: { installed: InstalledRuntime[]; services: ServiceInfo[] }) {
+/** Web server → PHP → MariaDB as connected nodes; the links animate while traffic can flow. */
+function StackDiagram({
+  installed,
+  services,
+  settings,
+}: {
+  installed: InstalledRuntime[];
+  services: ServiceInfo[];
+  settings?: Settings;
+}) {
+  const pools = useQuery({ queryKey: ["php-status"], queryFn: api.phpStatus, refetchInterval: 5000 });
   const svc = (kind: string) => services.find((s) => s.kind === kind);
-  const apacheUp = svc("apache")?.state === "running";
+  const active = (r: Runtime) => installed.find((x) => x.runtime === r)?.active ?? null;
+  const mode = settings?.webServer ?? "apache";
+  const servers = (["apache", "nginx"] as const).filter((s) => (s === "apache" ? mode !== "nginx" : mode !== "apache"));
+  const webUp = servers.some((s) => svc(s)?.state === "running");
   const dbUp = svc("mariadb")?.state === "running";
-  const phpFpm = svc("php-fpm");
-  const phpUp = phpFpm ? phpFpm.state === "running" : apacheUp;
+  const phpUp = (pools.data ?? []).some((p) => p.alive > 0);
+  const workers = (pools.data ?? []).reduce((n, p) => n + p.alive, 0);
 
-  const status: Record<string, { up: boolean; text: string }> = {
-    apache: { up: apacheUp, text: apacheUp ? `Running on port ${svc("apache")?.port}` : "Stopped" },
-    php: {
-      up: phpUp,
-      text: phpFpm ? (phpUp ? `FPM on port ${phpFpm.port}` : "Stopped") : apacheUp ? "Loaded into Apache" : "Idle",
+  const nodes: {
+    key: string;
+    role: string;
+    title: string;
+    version: ReactNode;
+    tile: Runtime;
+    up: boolean;
+    text: string;
+  }[] = [
+    {
+      key: "web",
+      role: "Serves your sites",
+      title: servers.map((s) => runtimeLabels[s]).join(" + "),
+      version: servers.map((s) => active(s) ?? "—").join(" · "),
+      tile: servers[0],
+      up: webUp,
+      text: servers
+        .map((s) => {
+          const info = svc(s);
+          return info?.state === "running" ? `${runtimeLabels[s]} on ${info.port}` : `${runtimeLabels[s]} stopped`;
+        })
+        .join(" · "),
     },
-    mariadb: { up: dbUp, text: dbUp ? `Running on port ${svc("mariadb")?.port}` : "Stopped" },
-  };
+    {
+      key: "php",
+      role: "Runs your code",
+      title: "PHP",
+      version: (pools.data?.length ? pools.data.map((p) => p.version) : [active("php") ?? "—"]).join(" · "),
+      tile: "php",
+      up: phpUp,
+      text: phpUp ? `${workers} FastCGI worker${workers === 1 ? "" : "s"}` : "Starts with the web server",
+    },
+    {
+      key: "db",
+      role: "Stores your data",
+      title: "MariaDB",
+      version: active("mariadb") ?? "—",
+      tile: "mariadb",
+      up: dbUp,
+      text: dbUp ? `Running on port ${svc("mariadb")?.port}` : "Stopped",
+    },
+  ];
   const links = [
-    { label: phpFpm ? "FastCGI" : "mod_php", live: apacheUp && phpUp },
+    { label: "FastCGI", live: webUp && phpUp },
     { label: "mysqli · PDO", live: phpUp && dbUp },
   ];
 
@@ -102,41 +150,33 @@ function StackDiagram({ installed, services }: { installed: InstalledRuntime[]; 
         <p className="text-sm text-muted">Requests flow left to right while services are running.</p>
       </div>
       <div className="flex flex-col items-stretch gap-3 md:flex-row md:items-center">
-        {order.map((runtime, i) => {
-          const version = installed.find((x) => x.runtime === runtime)?.active;
-          const s = status[runtime];
-          return (
-            <div key={runtime} className="contents">
-              <div
-                className={clsx(
-                  "flex flex-1 items-center gap-4 rounded-2xl border p-4 transition-colors",
-                  s.up ? "border-accent/30 bg-accent-soft/60" : "border-line bg-bg",
-                )}
-              >
-                <IconTile className={clsx("size-14", runtimeTiles[runtime].className)}>
-                  {runtimeTiles[runtime].icon(26)}
-                </IconTile>
-                <div className="min-w-0">
-                  <div className="text-xs font-medium tracking-wide text-muted uppercase">{roles[runtime].blurb}</div>
-                  <div className="font-bold">{runtimeLabels[runtime]}</div>
-                  <div className="font-mono text-xl font-semibold tracking-tight">
-                    {version ?? <span className="text-base text-muted">not installed</span>}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                    <span className={clsx("size-1.5 rounded-full", s.up ? "bg-ok" : "bg-muted/50")} />
-                    {s.text}
-                  </div>
+        {nodes.map((n, i) => (
+          <div key={n.key} className="contents">
+            <div
+              className={clsx(
+                "flex flex-1 items-center gap-4 rounded-2xl border p-4 transition-colors",
+                n.up ? "border-accent/30 bg-accent-soft/60" : "border-line bg-bg",
+              )}
+            >
+              <IconTile className={clsx("size-14", runtimeTiles[n.tile].className)}>{runtimeTiles[n.tile].icon(26)}</IconTile>
+              <div className="min-w-0">
+                <div className="text-xs font-medium tracking-wide text-muted uppercase">{n.role}</div>
+                <div className="font-bold">{n.title}</div>
+                <div className="truncate font-mono text-lg font-semibold tracking-tight">{n.version}</div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                  <span className={clsx("size-1.5 shrink-0 rounded-full", n.up ? "bg-ok" : "bg-muted/50")} />
+                  <span className="truncate">{n.text}</span>
                 </div>
               </div>
-              {i < links.length && (
-                <div className="flex shrink-0 flex-col items-center gap-1.5 md:w-28">
-                  <span className="text-[11px] font-medium text-muted">{links[i].label}</span>
-                  <div className={clsx("h-0.5 w-full rounded-full max-md:h-6 max-md:w-0.5", links[i].live ? "flow-line" : "bg-line")} />
-                </div>
-              )}
             </div>
-          );
-        })}
+            {i < links.length && (
+              <div className="flex shrink-0 flex-col items-center gap-1.5 md:w-24">
+                <span className="text-[11px] font-medium text-muted">{links[i].label}</span>
+                <div className={clsx("h-0.5 w-full rounded-full max-md:h-6 max-md:w-0.5", links[i].live ? "flow-line" : "bg-line")} />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </Card>
   );

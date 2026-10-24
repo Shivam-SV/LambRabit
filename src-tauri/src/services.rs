@@ -11,8 +11,10 @@ use tokio::{
 
 use crate::{
     config::Settings,
+    config::Server,
     configs,
     diagnose::{self, Probe, Problem},
+    php::{self, PhpPools, PoolPlan},
     error::{Error, Result},
     logs::{self, Level},
     sites,
@@ -27,28 +29,35 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 #[serde(rename_all = "kebab-case")]
 pub enum ServiceKind {
     Apache,
+    Nginx,
     Mariadb,
-    /// Windows loads PHP into Apache as a module; elsewhere it runs as php-fpm.
-    PhpFpm,
     /// Catches outgoing mail (SMTP) and shows it in a web inbox.
     Mailpit,
 }
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        let mut kinds = vec![Self::Apache, Self::Mariadb];
-        if !cfg!(windows) {
-            kinds.push(Self::PhpFpm);
+        vec![Self::Apache, Self::Nginx, Self::Mariadb, Self::Mailpit]
+    }
+
+    pub fn web_server(self) -> Option<Server> {
+        match self {
+            Self::Apache => Some(Server::Apache),
+            Self::Nginx => Some(Server::Nginx),
+            _ => None,
         }
-        kinds.push(Self::Mailpit);
-        kinds
+    }
+
+    /// Web servers only run when Settings → Web server includes them.
+    pub fn enabled(self, settings: &Settings) -> bool {
+        self.web_server().is_none_or(|s| settings.server_enabled(s))
     }
 
     pub fn id(self) -> &'static str {
         match self {
             Self::Apache => "apache",
+            Self::Nginx => "nginx",
             Self::Mariadb => "mariadb",
-            Self::PhpFpm => "php-fpm",
             Self::Mailpit => "mailpit",
         }
     }
@@ -56,8 +65,8 @@ impl ServiceKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Apache => "Apache",
+            Self::Nginx => "Nginx",
             Self::Mariadb => "MariaDB",
-            Self::PhpFpm => "PHP-FPM",
             Self::Mailpit => "Mailpit",
         }
     }
@@ -65,8 +74,8 @@ impl ServiceKind {
     fn runtime(self) -> &'static str {
         match self {
             Self::Apache => "apache",
+            Self::Nginx => "nginx",
             Self::Mariadb => "mariadb",
-            Self::PhpFpm => "php",
             Self::Mailpit => "mailpit",
         }
     }
@@ -74,8 +83,8 @@ impl ServiceKind {
     fn version(self, settings: &Settings) -> Option<String> {
         match self {
             Self::Apache => settings.versions.apache.clone(),
+            Self::Nginx => settings.versions.nginx.clone(),
             Self::Mariadb => settings.versions.mariadb.clone(),
-            Self::PhpFpm => settings.versions.php.clone(),
             Self::Mailpit => settings.versions.mailpit.clone(),
         }
     }
@@ -83,8 +92,8 @@ impl ServiceKind {
     pub fn config_path(self, layout: &Layout) -> PathBuf {
         match self {
             Self::Apache => layout.etc("apache").join("httpd.conf"),
+            Self::Nginx => layout.etc("nginx").join("nginx.conf"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
-            Self::PhpFpm => layout.etc("php").join("php-fpm.conf"),
             // Mailpit is configured on the command line; its data lives here.
             Self::Mailpit => layout.data("mailpit"),
         }
@@ -94,8 +103,8 @@ impl ServiceKind {
     pub fn log_path(self, layout: &Layout) -> PathBuf {
         let file = match self {
             Self::Apache => "apache-error.log",
+            Self::Nginx => "nginx-error.log",
             Self::Mariadb => "mariadb-error.log",
-            Self::PhpFpm => "php-fpm.log",
             Self::Mailpit => "mailpit-output.log",
         };
         layout.logs().join(file)
@@ -103,9 +112,9 @@ impl ServiceKind {
 
     fn port(self, settings: &Settings) -> u16 {
         match self {
-            Self::Apache => settings.ports.http,
+            Self::Apache => settings.server_ports(Server::Apache).0,
+            Self::Nginx => settings.server_ports(Server::Nginx).0,
             Self::Mariadb => settings.ports.mysql,
-            Self::PhpFpm => settings.ports.php_fpm,
             Self::Mailpit => settings.ports.mail_smtp,
         }
     }
@@ -186,9 +195,20 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 path(layout.etc("apache").join("httpd.conf")),
             ],
             cwd: home,
-            path_prepend: settings.versions.php.iter().map(|v| layout.bin("php", v)).collect(),
+            path_prepend: vec![],
             stop_cmd: None,
         },
+        ServiceKind::Nginx => {
+            let prefix = format!("{}/", path(layout.tmp().join("nginx")));
+            let conf = path(layout.etc("nginx").join("nginx.conf"));
+            LaunchSpec {
+                program: home.join(exe("nginx")),
+                args: vec!["-p".into(), prefix.clone(), "-c".into(), conf.clone()],
+                stop_cmd: Some((home.join(exe("nginx")), vec!["-p".into(), prefix, "-c".into(), conf, "-s".into(), "quit".into()])),
+                cwd: home,
+                path_prepend: vec![],
+            }
+        }
         ServiceKind::Mariadb => {
             let defaults = format!("--defaults-file={}", path(layout.etc("mariadb").join("my.ini")));
             LaunchSpec {
@@ -203,19 +223,6 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 path_prepend: vec![],
             }
         }
-        ServiceKind::PhpFpm => LaunchSpec {
-            program: home.join(exe("php-fpm")),
-            args: vec![
-                "--nodaemonize".into(),
-                "--fpm-config".into(),
-                path(layout.etc("php").join("php-fpm.conf")),
-                "-c".into(),
-                path(layout.etc("php").join("php.ini")),
-            ],
-            cwd: home,
-            path_prepend: vec![],
-            stop_cmd: None,
-        },
         ServiceKind::Mailpit => LaunchSpec {
             program: home.join(exe("mailpit")),
             args: vec![
@@ -237,32 +244,36 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
     Ok(spec)
 }
 
-/// Writes configs and does first-run setup for a service.
-async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
+/// Writes configs and does first-run setup for a service. Web servers return the PHP
+/// pools their sites need.
+async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<Vec<PoolPlan>> {
     layout.ensure()?;
     match kind {
-        ServiceKind::Apache => {
-            if cfg!(windows) && settings.versions.php.is_some() {
-                configs::write_php(settings, layout)?;
-            }
+        ServiceKind::Apache | ServiceKind::Nginx => {
+            let server = kind.web_server().unwrap();
             configs::write_tools(settings, layout)?;
             let sites = sites::served(settings, layout);
-            if sites::write_vhosts(settings, layout, &sites)? {
+            let plan = php::plan(settings, layout, &sites);
+            if sites::write_config(settings, layout, &sites, &plan, server)? {
                 logs::system(app, Level::Info, "Created the local certificate authority for HTTPS sites");
             }
-            configs::write_apache(settings, layout)?;
-            let _ = std::fs::remove_file(configs::apache_pid_file(layout));
+            if kind == ServiceKind::Apache {
+                configs::write_apache(settings, layout, &plan)?;
+                let _ = std::fs::remove_file(configs::apache_pid_file(layout));
+            } else {
+                configs::nginx_prefix(layout)?;
+            }
             sync_hosts(app, settings, layout, &sites).await;
-            Ok(())
+            Ok(plan)
         }
         ServiceKind::Mariadb => {
             configs::write_mariadb(settings, layout)?;
-            configs::init_mariadb_data(settings, layout).await
+            configs::init_mariadb_data(settings, layout).await?;
+            Ok(vec![])
         }
-        ServiceKind::PhpFpm => configs::write_php(settings, layout),
         ServiceKind::Mailpit => {
             std::fs::create_dir_all(layout.data("mailpit"))?;
-            Ok(())
+            Ok(vec![])
         }
     }
 }
@@ -271,7 +282,12 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
 pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Vec<u16> {
     let mut ports = vec![kind.port(settings)];
     match kind {
-        ServiceKind::Apache if sites::served(settings, layout).iter().any(|s| s.ssl) => ports.push(settings.ports.https),
+        ServiceKind::Apache | ServiceKind::Nginx => {
+            let server = kind.web_server().unwrap();
+            if sites::served(settings, layout).iter().any(|s| s.ssl && s.server == server) {
+                ports.push(settings.server_ports(server).1);
+            }
+        }
         ServiceKind::Mailpit => ports.push(settings.ports.mail_ui),
         _ => {}
     }
@@ -282,18 +298,19 @@ pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -
 /// before Apache is started for real.
 /// Apache's config test for the diagnostics report: None when Apache isn't installed or
 /// has never been started (no generated config yet).
-pub async fn config_test(settings: &Settings, layout: &Layout) -> Option<std::result::Result<(), String>> {
-    let spec = launch_spec(ServiceKind::Apache, settings, layout).ok()?;
-    if !spec.program.exists() || !layout.etc("apache").join("httpd.conf").exists() {
+pub async fn config_test(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Option<std::result::Result<(), String>> {
+    let spec = launch_spec(kind, settings, layout).ok()?;
+    if !spec.program.exists() || !kind.config_path(layout).exists() {
         return None;
     }
-    Some(match apache_config_test(&spec).await {
+    Some(match server_config_test(&spec).await {
         None => Ok(()),
         Some(err) => Err(err),
     })
 }
 
-async fn apache_config_test(spec: &LaunchSpec) -> Option<String> {
+/// `httpd -t` / `nginx -t`. None when the config is valid, otherwise the error output.
+async fn server_config_test(spec: &LaunchSpec) -> Option<String> {
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args).arg("-t").current_dir(&spec.cwd);
     if !spec.path_prepend.is_empty() {
@@ -351,6 +368,8 @@ struct Handle {
 #[derive(Default)]
 pub struct Supervisor {
     running: Arc<Mutex<HashMap<ServiceKind, Handle>>>,
+    /// PHP FastCGI pools, started and stopped with the web servers.
+    pub php: Arc<PhpPools>,
     problems: Arc<std::sync::Mutex<HashMap<ServiceKind, Problem>>>,
     health: Arc<std::sync::Mutex<HashMap<ServiceKind, Health>>>,
 }
@@ -416,7 +435,9 @@ impl Supervisor {
                     diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.http)).await
                 }
                 ServiceKind::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
-                ServiceKind::PhpFpm => diagnose::probe_tcp(settings.ports.php_fpm).await,
+                ServiceKind::Nginx => {
+                    diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.server_ports(Server::Nginx).0)).await
+                }
                 ServiceKind::Mailpit => {
                     diagnose::probe_http(client, &format!("http://127.0.0.1:{}/livez", settings.ports.mail_ui)).await
                 }
@@ -521,19 +542,28 @@ impl Supervisor {
                 return Err(Error::msg(message));
             }
         }
-        prepare(app, kind, settings, layout).await?;
-        if kind == ServiceKind::Apache {
-            if let Some(output) = apache_config_test(&spec).await {
-                let line = output.lines().find(|l| l.contains("rror")).unwrap_or(&output).to_string();
+        let plan = prepare(app, kind, settings, layout).await?;
+        if kind.web_server().is_some() {
+            if let Some(output) = server_config_test(&spec).await {
+                let line = output
+                    .lines()
+                    .find(|l| l.contains("rror") || l.contains("emerg"))
+                    .unwrap_or(&output)
+                    .to_string();
                 self.set_problem(
                     kind,
                     Problem::new(
-                        "Apache configuration error",
+                        format!("{} configuration error", kind.label()),
                         line.clone(),
                         &["If the error points into etc/apache/sites/, fix or remove that file. lampRabit's own config files are regenerated on every start."],
                     ),
                 );
-                return Err(Error::msg(format!("Apache configuration test failed: {line}")));
+                return Err(Error::msg(format!("{} configuration test failed: {line}", kind.label())));
+            }
+            // PHP has to be listening before the web server takes requests.
+            if let Err(e) = self.php.ensure(app, settings, layout, &plan).await {
+                self.set_problem(kind, Problem::new("PHP couldn't start", e.to_string(), &[]));
+                return Err(e);
             }
         }
 
@@ -585,6 +615,7 @@ impl Supervisor {
 
         let running = self.running.clone();
         let problems = self.problems.clone();
+        let pools = self.php.clone();
         let logs_to_read = [kind.log_path(layout), layout.logs().join(format!("{}-output.log", kind.id()))];
         let app = app.clone();
         let stop_cmd = spec.stop_cmd;
@@ -627,7 +658,14 @@ impl Supervisor {
                 g.kill();
             }
             drop(group);
-            running.lock().await.remove(&kind);
+            let web_servers_left = {
+                let mut running = running.lock().await;
+                running.remove(&kind);
+                running.keys().any(|k| k.web_server().is_some())
+            };
+            if kind.web_server().is_some() && !web_servers_left {
+                pools.stop_all(&app).await;
+            }
             match &message {
                 Some(m) => logs::system(&app, Level::Error, m.clone()),
                 None => logs::system(&app, Level::Info, format!("{} stopped", kind.label())),
@@ -683,8 +721,7 @@ where
         let mut lines = BufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = log.lock().await.write_all(format!("{line}\n").as_bytes()).await;
-            let service = if kind == ServiceKind::PhpFpm { "php" } else { kind.id() };
-            crate::logs::push(&app, service, "output", line);
+            crate::logs::push(&app, kind.id(), "output", line);
         }
     });
 }

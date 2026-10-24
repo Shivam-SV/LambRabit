@@ -70,6 +70,17 @@ export function parseLog(raw: RawLogLine, received = new Date()): LogEntry {
     };
   }
 
+  // Nginx: 2026/10/24 19:00:00 [error] 1234#5678: *1 message
+  if ((m = line.match(/^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}:\d{2}:\d{2}) \[(\w+)\] \d+#\d+: (?:\*\d+ )?(.*)$/))) {
+    const kind = m[5];
+    return {
+      ...base,
+      time: validDate(new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}`)) ?? received,
+      level: ["emerg", "alert", "crit", "error"].includes(kind) ? "error" : kind === "warn" ? "warn" : kind === "notice" ? "notice" : "info",
+      message: m[6],
+    };
+  }
+
   // MariaDB: 2026-10-24 17:43:11 0 [Note] InnoDB: ...
   if ((m = line.match(/^(\d{4}-\d{2}-\d{2}) +(\d{1,2}):(\d{2}:\d{2}) +\d+ \[(\w+)\] (.*)$/))) {
     const kind = m[4].toLowerCase();

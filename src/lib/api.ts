@@ -1,20 +1,23 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "mariadb" | "php-fpm" | "mailpit";
+export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit";
+export type WebServer = "apache" | "nginx" | "both";
+export type Server = "apache" | "nginx";
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
-export type Runtime = "apache" | "php" | "mariadb" | "mailpit" | "adminer" | "phpmyadmin";
-export const coreRuntimes: Runtime[] = ["apache", "php", "mariadb"];
+export type Runtime = "apache" | "nginx" | "php" | "mariadb" | "mailpit" | "adminer" | "phpmyadmin";
+export const coreRuntimes: Runtime[] = ["apache", "nginx", "php", "mariadb"];
 export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin"];
 
 export const serviceLabels: Record<ServiceKind, string> = {
   apache: "Apache",
+  nginx: "Nginx",
   mariadb: "MariaDB",
-  "php-fpm": "PHP-FPM",
   mailpit: "Mailpit",
 };
 
 export const runtimeLabels: Record<Runtime, string> = {
   apache: "Apache",
+  nginx: "Nginx",
   php: "PHP",
   mariadb: "MariaDB",
   mailpit: "Mailpit",
@@ -102,6 +105,16 @@ export interface Site {
   /** Set for built-in tools rather than www/ folders. */
   tool: "adminer" | "phpmyadmin" | "mailpit" | null;
   proxy: string | null;
+  /** PHP version chosen for the site; null follows the active version. */
+  php: string | null;
+  server: Server;
+}
+
+export interface PoolStatus {
+  version: string;
+  port: number;
+  workers: number;
+  alive: number;
 }
 
 export interface SitesInfo {
@@ -127,7 +140,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "php" | "mariadb" | "mailpit" | "system";
+export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mailpit" | "system";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -140,12 +153,23 @@ export interface RawLogLine {
 export interface Settings {
   rootDir: string;
   tld: string;
-  ports: { http: number; https: number; mysql: number; phpFpm: number; mailSmtp: number; mailUi: number };
+  ports: {
+    http: number;
+    https: number;
+    mysql: number;
+    phpFpm: number;
+    nginxHttp: number;
+    nginxHttps: number;
+    mailSmtp: number;
+    mailUi: number;
+  };
   versions: Record<Runtime, string | null>;
+  webServer: WebServer;
+  phpWorkers: number;
   httpsByDefault: boolean;
   manageHosts: boolean;
   routeMail: boolean;
-  sites: Record<string, { ssl: boolean | null }>;
+  sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null }>;
 }
 
 export interface EnvPaths {
@@ -167,6 +191,9 @@ export const api = {
   listSites: () => invoke<SitesInfo>("list_sites"),
   applySites: () => invoke<void>("apply_sites"),
   setSiteSsl: (name: string, ssl: boolean) => invoke<void>("set_site_ssl", { name, ssl }),
+  setSitePhp: (name: string, version: string | null) => invoke<void>("set_site_php", { name, version }),
+  setSiteServer: (name: string, server: Server | null) => invoke<void>("set_site_server", { name, server }),
+  phpStatus: () => invoke<PoolStatus[]>("php_status"),
   trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),
   startAll: () => invoke<string[]>("start_all"),

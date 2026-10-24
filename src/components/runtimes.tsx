@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code2, Database, Feather, Mail, Table2, TableProperties } from "lucide-react";
+import { Code2, Database, Feather, Mail, Server, Table2, TableProperties } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -8,6 +8,11 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-rose-500/10 text-rose-500",
     text: "text-rose-500",
     icon: (size) => <Feather size={size} strokeWidth={1.75} />,
+  },
+  nginx: {
+    className: "bg-emerald-600/10 text-emerald-600",
+    text: "text-emerald-600",
+    icon: (size) => <Server size={size} strokeWidth={1.75} />,
   },
   php: {
     className: "bg-indigo-500/10 text-indigo-500",

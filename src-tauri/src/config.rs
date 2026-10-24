@@ -16,6 +16,10 @@ pub struct Settings {
     pub tld: String,
     pub ports: Ports,
     pub versions: Versions,
+    /// Which web servers run: Apache, Nginx, or both side by side.
+    pub web_server: WebServer,
+    /// php-cgi processes per PHP version on Windows (php-fpm manages its own pool elsewhere).
+    pub php_workers: u8,
     /// HTTPS for sites that have no setting of their own.
     pub https_by_default: bool,
     /// Keep the system hosts file in sync with the site list when Apache starts.
@@ -30,6 +34,49 @@ pub struct Settings {
 #[serde(default, rename_all = "camelCase")]
 pub struct SiteSettings {
     pub ssl: Option<bool>,
+    /// PHP version for this site; the active version when unset.
+    pub php: Option<String>,
+    /// Web server for this site when both are enabled.
+    pub server: Option<Server>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebServer {
+    #[default]
+    Apache,
+    Nginx,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Server {
+    Apache,
+    Nginx,
+}
+
+impl Settings {
+    pub fn server_enabled(&self, server: Server) -> bool {
+        matches!(
+            (self.web_server, server),
+            (WebServer::Both, _) | (WebServer::Apache, Server::Apache) | (WebServer::Nginx, Server::Nginx)
+        )
+    }
+
+    /// (http, https) for a web server. With both enabled, Apache keeps the main ports and
+    /// Nginx uses its own; alone, either server uses the main ports.
+    pub fn server_ports(&self, server: Server) -> (u16, u16) {
+        match (server, self.web_server) {
+            (Server::Nginx, WebServer::Both) => (self.ports.nginx_http, self.ports.nginx_https),
+            _ => (self.ports.http, self.ports.https),
+        }
+    }
+
+    /// The server that also hosts localhost and the developer tools.
+    pub fn primary_server(&self) -> Server {
+        if self.web_server == WebServer::Nginx { Server::Nginx } else { Server::Apache }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,8 +85,11 @@ pub struct Ports {
     pub http: u16,
     pub https: u16,
     pub mysql: u16,
-    /// Only used on platforms where PHP runs as php-fpm (macOS/Linux).
+    /// First port for PHP FastCGI workers; each PHP version in use takes a block of 10.
     pub php_fpm: u16,
+    /// Nginx's ports when it runs next to Apache.
+    pub nginx_http: u16,
+    pub nginx_https: u16,
     /// Mailpit's SMTP server, where PHP and frameworks send mail.
     pub mail_smtp: u16,
     /// Mailpit's web inbox.
@@ -51,6 +101,7 @@ pub struct Ports {
 #[serde(default)]
 pub struct Versions {
     pub apache: Option<String>,
+    pub nginx: Option<String>,
     pub php: Option<String>,
     pub mariadb: Option<String>,
     pub mailpit: Option<String>,
@@ -65,6 +116,8 @@ impl Default for Settings {
             tld: "test".into(),
             ports: Ports::default(),
             versions: Versions::default(),
+            web_server: WebServer::Apache,
+            php_workers: 4,
             https_by_default: true,
             manage_hosts: true,
             route_mail: true,
@@ -75,7 +128,16 @@ impl Default for Settings {
 
 impl Default for Ports {
     fn default() -> Self {
-        Self { http: 80, https: 443, mysql: 3306, php_fpm: 9000, mail_smtp: 1025, mail_ui: 8025 }
+        Self {
+            http: 80,
+            https: 443,
+            mysql: 3306,
+            php_fpm: 9000,
+            nginx_http: 8080,
+            nginx_https: 8443,
+            mail_smtp: 1025,
+            mail_ui: 8025,
+        }
     }
 }
 

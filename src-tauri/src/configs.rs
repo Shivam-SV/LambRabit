@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    config::Settings,
+    config::{Server, Settings},
+    php::PoolPlan,
     error::{Error, Result},
     layout::{Layout, exe},
 };
@@ -14,24 +15,23 @@ fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-fn php_home(settings: &Settings, layout: &Layout) -> Option<PathBuf> {
-    settings.versions.php.as_ref().map(|v| layout.bin("php", v)).filter(|p| p.exists())
-}
-
-pub fn write_apache(settings: &Settings, layout: &Layout) -> Result<()> {
+pub fn write_apache(settings: &Settings, layout: &Layout, plan: &[PoolPlan]) -> Result<()> {
     let version = settings.versions.apache.as_ref().ok_or_else(|| Error::msg("Apache is not installed"))?;
     let home = slash(&layout.bin("apache", version));
     let etc = layout.etc("apache");
     std::fs::create_dir_all(etc.join("sites"))?;
     let www = slash(&layout.www());
     let logs = slash(&layout.logs());
-    let port = settings.ports.http;
+    let port = settings.server_ports(Server::Apache).0;
+    let runtime_dir = layout.tmp().join("apache");
+    std::fs::create_dir_all(&runtime_dir)?;
 
     let mut modules = vec![
         "access_compat", "actions", "alias", "allowmethods", "auth_basic", "authn_core", "authn_file",
         "authz_core", "authz_groupfile", "authz_host", "authz_user", "autoindex", "deflate", "dir", "env",
-        "expires", "filter", "headers", "include", "log_config", "mime", "negotiation", "proxy",
-        "proxy_fcgi", "proxy_http", "rewrite", "setenvif", "socache_shmcb", "vhost_alias",
+        "expires", "filter", "headers", "include", "lbmethod_byrequests", "log_config", "mime", "negotiation",
+        "proxy", "proxy_balancer", "proxy_fcgi", "proxy_http", "rewrite", "setenvif", "slotmem_shm",
+        "socache_shmcb", "vhost_alias",
     ];
     if !cfg!(windows) {
         modules.extend(["mpm_event", "unixd"]);
@@ -41,24 +41,23 @@ pub fn write_apache(settings: &Settings, layout: &Layout) -> Result<()> {
         .map(|m| format!("LoadModule {m}_module modules/mod_{m}.so\n"))
         .collect();
 
-    let php = match php_home(settings, layout) {
-        Some(php) if cfg!(windows) => {
-            let module = php.join("php8apache2_4.dll");
-            if module.exists() {
-                format!(
-                    "LoadModule php_module \"{}\"\nPHPIniDir \"{}\"\n<FilesMatch \"\\.php$\">\n    SetHandler application/x-httpd-php\n</FilesMatch>\n",
-                    slash(&module),
-                    slash(&layout.etc("php")),
-                )
-            } else {
-                "# PHP build has no Apache module (non thread-safe build?)\n".into()
-            }
-        }
-        Some(_) => format!(
-            "<FilesMatch \"\\.php$\">\n    SetHandler \"proxy:fcgi://127.0.0.1:{}\"\n</FilesMatch>\n",
-            settings.ports.php_fpm
-        ),
-        None => "# PHP is not installed\n".into(),
+    // PHP runs in FastCGI worker pools (see php.rs); one balancer per PHP version in use.
+    let balancers: String = plan
+        .iter()
+        .map(|p| {
+            let members: String = p.ports().map(|port| format!("    BalancerMember \"fcgi://127.0.0.1:{port}\"\n")).collect();
+            format!("<Proxy \"balancer://{}/\">\n{members}</Proxy>\n", p.name())
+        })
+        .collect();
+    let php = if plan.is_empty() {
+        "# PHP is not installed\n".to_string()
+    } else {
+        // GENERIC passes SCRIPT_FILENAME as a plain path; on Windows it arrives as
+        // "/C:/...", so strip the slash before the drive letter.
+        format!(
+            "ProxyFCGIBackendType GENERIC\nProxyFCGISetEnvIf \"reqenv('SCRIPT_FILENAME') =~ m#^/([A-Za-z]:/.*)#\" SCRIPT_FILENAME \"$1\"\n{balancers}{default}",
+            default = crate::sites::apache_php_handler(crate::php::pool_for(plan, None, settings), ""),
+        )
     };
 
     let conf = format!(
@@ -95,6 +94,7 @@ DirectoryIndex index.php index.html index.htm
     Require all denied
 </Files>
 
+DefaultRuntimeDir "{runtime}"
 PidFile "{pidfile}"
 ErrorLog "{logs}/apache-error.log"
 LogLevel warn
@@ -122,7 +122,8 @@ Include "{vhosts}"
 IncludeOptional "{sites}/*.conf"
 "#,
         sites = slash(&etc.join("sites")),
-        vhosts = slash(&crate::sites::vhosts_path(layout)),
+        vhosts = slash(&crate::sites::config_path(layout, Server::Apache)),
+        runtime = slash(&runtime_dir),
         pidfile = slash(&apache_pid_file(layout)),
     );
     std::fs::write(etc.join("httpd.conf"), conf)?;
@@ -195,7 +196,10 @@ $cfg['VersionCheck'] = false;
             port = settings.ports.mysql,
             tmp = slash(&tmp),
         );
-        std::fs::write(layout.bin("phpmyadmin", version).join("config.inc.php"), config)?;
+        let dir = layout.bin("phpmyadmin", version);
+        std::fs::write(dir.join("config.inc.php"), config)?;
+        // phpMyAdmin lags behind new PHP releases; keep deprecation notices off its pages.
+        std::fs::write(dir.join(".user.ini"), "display_errors = Off\n")?;
     }
     Ok(())
 }
@@ -218,9 +222,13 @@ fn phpmyadmin_secret(layout: &Layout) -> Result<String> {
     Ok(secret)
 }
 
-pub fn write_php(settings: &Settings, layout: &Layout) -> Result<()> {
-    let home = php_home(settings, layout).ok_or_else(|| Error::msg("PHP is not installed"))?;
-    let etc = layout.etc("php");
+/// Writes etc/php/<version>/php.ini (and php-fpm.conf outside Windows); returns the ini path.
+pub fn write_php(settings: &Settings, layout: &Layout, version: &str, port: u16) -> Result<PathBuf> {
+    let home = layout.bin("php", version);
+    if !home.exists() {
+        return Err(Error::msg(format!("PHP {version} is not installed")));
+    }
+    let etc = layout.etc("php").join(version);
     std::fs::create_dir_all(&etc)?;
     let sessions = layout.tmp().join("sessions");
     std::fs::create_dir_all(&sessions)?;
@@ -266,17 +274,17 @@ upload_tmp_dir = "{tmp}"
         ini.push_str("zend_extension=opcache\nopcache.enable=1\nopcache.validate_timestamps=1\nopcache.revalidate_freq=0\n");
     }
     ini.push_str(&mail_directives(settings, layout));
-    std::fs::write(etc.join("php.ini"), ini)?;
+    let ini_path = etc.join("php.ini");
+    std::fs::write(&ini_path, ini)?;
 
     if !cfg!(windows) {
         let fpm = format!(
             "[global]\nerror_log = {logs}/php-fpm.log\n\n[www]\nlisten = 127.0.0.1:{port}\npm = dynamic\npm.max_children = 10\npm.start_servers = 2\npm.min_spare_servers = 1\npm.max_spare_servers = 4\n",
             logs = slash(&layout.logs()),
-            port = settings.ports.php_fpm,
         );
         std::fs::write(etc.join("php-fpm.conf"), fpm)?;
     }
-    Ok(())
+    Ok(ini_path)
 }
 
 pub fn mariadb_home(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
@@ -362,4 +370,13 @@ pub async fn init_mariadb_data(settings: &Settings, layout: &Layout) -> Result<(
         )));
     }
     Ok(())
+}
+
+/// Nginx needs a writable prefix with logs/ and temp/ folders.
+pub fn nginx_prefix(layout: &Layout) -> Result<PathBuf> {
+    let prefix = layout.tmp().join("nginx");
+    for dir in ["logs", "temp"] {
+        std::fs::create_dir_all(prefix.join(dir))?;
+    }
+    Ok(prefix)
 }

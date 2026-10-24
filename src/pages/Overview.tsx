@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
   ChevronRight,
-  Code2,
+  Server as ServerIcon,
   Database,
   ExternalLink,
   Feather,
@@ -32,6 +32,7 @@ import {
   type ServiceKind,
   type Site,
   type SitesInfo,
+  type WebServer,
 } from "../lib/api";
 import { useAppStore, type Activity } from "../lib/store";
 import { toolUrl } from "../lib/tools";
@@ -52,7 +53,7 @@ const greetings = [
 const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blurb: string }> = {
   apache: { icon: Feather, tile: "bg-rose-500/10 text-rose-500", blurb: "Web server for your local sites" },
   mariadb: { icon: Database, tile: "bg-amber-600/12 text-amber-600", blurb: "Database server for your local sites" },
-  "php-fpm": { icon: Code2, tile: "bg-indigo-500/10 text-indigo-500", blurb: "Runs PHP for your local sites" },
+  nginx: { icon: ServerIcon, tile: "bg-emerald-600/10 text-emerald-600", blurb: "Fast web server for your local sites" },
   mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
 };
 
@@ -65,7 +66,7 @@ export default function Overview() {
 
   const hour = new Date(now).getHours();
   const greeting = greetings.find((g) => hour < g.until)!;
-  const installed = services.data?.filter((s) => s.installed) ?? [];
+  const installed = services.data?.filter((s) => s.installed && serverEnabled(s.kind, settings.data?.webServer)) ?? [];
   const running = installed.filter((s) => s.state === "running");
   const siteCount = sites.data?.sites.length ?? 0;
 
@@ -138,8 +139,8 @@ export default function Overview() {
 
       <section className="grid gap-5 md:grid-cols-2">
         {services.data
-          // Optional services only appear once installed.
-          ?.filter((s) => s.kind !== "mailpit" || s.installed)
+          // Optional services only appear once installed; web servers when enabled in Settings.
+          ?.filter((s) => (s.kind !== "mailpit" || s.installed) && serverEnabled(s.kind, settings.data?.webServer))
           .map((s) => <ServiceCard key={s.kind} service={s} now={now} sites={sites.data} mailUi={mailUi} />)}
       </section>
 
@@ -316,6 +317,12 @@ function ServiceCard({
       </div>
     </Card>
   );
+}
+
+function serverEnabled(kind: ServiceKind, mode: WebServer | undefined) {
+  if (kind === "apache") return mode !== "nginx";
+  if (kind === "nginx") return mode === "nginx" || mode === "both";
+  return true;
 }
 
 const quickLinkInfo: Record<string, { label: string; blurb: string; needs: ServiceKind }> = {

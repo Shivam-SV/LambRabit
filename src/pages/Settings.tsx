@@ -10,6 +10,7 @@ import {
   Monitor,
   Moon,
   Plug,
+  ServerCog,
   Save,
   Settings2,
   Stethoscope,
@@ -24,17 +25,20 @@ import { Button, IconTile, PageHeader, SectionCard, Segmented, Switch, inputClas
 
 type Os = EnvPaths["os"];
 
-/** `only` limits a field to the platforms where it does anything. */
-const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; only?: Os[] }[] = [
-  { key: "http", label: "HTTP", hint: "Apache HTTP port." },
-  { key: "https", label: "HTTPS", hint: "Apache HTTPS port (SSL)." },
+/** `only` limits a field to the platforms where it does anything; `both` to when both web servers run. */
+const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; only?: Os[]; both?: boolean }[] = [
+  { key: "http", label: "HTTP", hint: "Main web server HTTP port." },
+  { key: "https", label: "HTTPS", hint: "Main web server HTTPS port (SSL)." },
+  { key: "nginxHttp", label: "Nginx HTTP", hint: "Nginx's own HTTP port next to Apache.", both: true },
+  { key: "nginxHttps", label: "Nginx HTTPS", hint: "Nginx's own HTTPS port next to Apache.", both: true },
   { key: "mysql", label: "MariaDB", hint: "MySQL-compatible database port." },
-  { key: "phpFpm", label: "PHP-FPM", hint: "PHP FastCGI Process Manager port.", only: ["macos", "linux"] },
+  { key: "phpFpm", label: "PHP FastCGI ports", hint: "Start of the range PHP workers use: 10 ports per PHP version." },
 ];
 
 const runtimeHints = (os: Os | undefined): Partial<Record<Runtime, string>> => ({
   apache: os === "windows" ? "HTTP server (Apache Lounge builds)" : "HTTP server",
-  php: os === "windows" ? "Thread-safe builds from windows.php.net" : "Runs as PHP-FPM",
+  nginx: "HTTP server (nginx.org builds)",
+  php: "Default for sites without their own version",
   mariadb: "MySQL-compatible database server",
 });
 
@@ -175,9 +179,45 @@ export default function Settings() {
           </div>
         </SectionCard>
 
+        <SectionCard icon={<ServerCog size={22} />} title="Web server" subtitle="Which server runs your sites.">
+          <div className="space-y-5">
+            <Segmented
+              value={draft.webServer}
+              onChange={(webServer) => setDraft({ ...draft, webServer })}
+              className="py-1.5"
+              options={[
+                { value: "apache", label: "Apache" },
+                { value: "nginx", label: "Nginx" },
+                { value: "both", label: "Both" },
+              ]}
+            />
+            <p className="text-sm text-muted">
+              {draft.webServer === "both"
+                ? `Apache keeps ports ${draft.ports.http}/${draft.ports.https}; Nginx uses ${draft.ports.nginxHttp}/${draft.ports.nginxHttps}. Pick the server for each site on the Sites page.`
+                : draft.webServer === "nginx"
+                  ? "Nginx serves every site. It doesn't read .htaccess files; lampRabit routes unknown URLs to index.php, which suits Laravel, Symfony and WordPress."
+                  : "Apache serves every site and honours .htaccess files, like XAMPP and Laragon."}
+            </p>
+            {os === "windows" && (
+              <Field label="PHP workers per version" hint="Each worker handles one request at a time. 4 suits most projects; raise it for parallel requests.">
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  className={inputClass}
+                  value={draft.phpWorkers}
+                  onChange={(e) => setDraft({ ...draft, phpWorkers: Math.max(1, Math.min(10, Number(e.target.value))) })}
+                />
+              </Field>
+            )}
+          </div>
+        </SectionCard>
+
         <SectionCard icon={<Plug size={22} />} title="Ports" subtitle="Network ports used by local services.">
           <div className="grid gap-x-5 gap-y-5 sm:grid-cols-2">
-            {portFields.filter((f) => !f.only || (os && f.only.includes(os))).map(({ key, label, hint }) => (
+            {portFields
+              .filter((f) => (!f.only || (os && f.only.includes(os))) && (!f.both || draft.webServer === "both"))
+              .map(({ key, label, hint }) => (
               <Field key={key} label={label} hint={hint}>
                 <input
                   type="number"
@@ -199,7 +239,9 @@ export default function Settings() {
 
         <SectionCard icon={<Layers size={22} />} title="Active versions" subtitle="Which installed version each service runs.">
           <div className="space-y-4">
-            {(["apache", "php", "mariadb"] as Runtime[]).map((runtime) => {
+            {(["apache", "nginx", "php", "mariadb"] as Runtime[])
+              .filter((r) => (r === "apache" ? draft.webServer !== "nginx" : r === "nginx" ? draft.webServer !== "apache" : true))
+              .map((runtime) => {
               const options = installed.data?.find((i) => i.runtime === runtime)?.versions ?? [];
               return (
                 <div key={runtime} className="flex items-start gap-4">
@@ -234,7 +276,12 @@ export default function Settings() {
           </div>
         </SectionCard>
 
-        <SectionCard icon={<Monitor size={22} />} title="Appearance" subtitle="Choose how lampRabit looks on your device.">
+        <SectionCard
+          icon={<Monitor size={22} />}
+          title="Appearance"
+          subtitle="Choose how lampRabit looks on your device."
+          className="lg:col-span-2"
+        >
           <Segmented
             value={theme}
             onChange={setTheme}

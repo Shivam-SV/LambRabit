@@ -21,6 +21,7 @@ use crate::{
 #[serde(rename_all = "lowercase")]
 pub enum Runtime {
     Apache,
+    Nginx,
     Php,
     Mariadb,
     /// Developer tools: a mail catcher and two database web UIs.
@@ -30,8 +31,9 @@ pub enum Runtime {
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 6] = [
+    pub const ALL: [Runtime; 7] = [
         Runtime::Apache,
+        Runtime::Nginx,
         Runtime::Php,
         Runtime::Mariadb,
         Runtime::Mailpit,
@@ -42,6 +44,7 @@ impl Runtime {
     pub fn id(self) -> &'static str {
         match self {
             Self::Apache => "apache",
+            Self::Nginx => "nginx",
             Self::Php => "php",
             Self::Mariadb => "mariadb",
             Self::Mailpit => "mailpit",
@@ -54,6 +57,7 @@ impl Runtime {
     pub fn marker(self) -> PathBuf {
         match self {
             Self::Apache => Path::new("bin").join(exe("httpd")),
+            Self::Nginx => PathBuf::from(exe("nginx")),
             Self::Php if cfg!(windows) => PathBuf::from(exe("php")),
             Self::Php => PathBuf::from("php-fpm"),
             Self::Mariadb => Path::new("bin").join(exe("mariadbd")),
@@ -109,6 +113,7 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
     let mut releases = match runtime {
         Runtime::Php => php_releases(client).await?,
         Runtime::Apache => apache_releases(client).await?,
+        Runtime::Nginx => nginx_releases(client).await?,
         Runtime::Mariadb => mariadb_releases(client).await?,
         Runtime::Mailpit => mailpit_releases(client).await?,
         Runtime::Adminer => adminer_releases(client).await?,
@@ -260,6 +265,56 @@ async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
         })
     });
     Ok(futures_util::future::join_all(fetches).await.into_iter().flatten().collect())
+}
+
+/// nginx.org lists the mainline and stable Windows builds on its download page. It
+/// publishes PGP signatures rather than checksums, so these downloads rely on HTTPS alone.
+async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    if !cfg!(windows) {
+        return Err(Error::msg(
+            "nginx.org only publishes Windows builds. On macOS and Linux, Nginx support will use the system package manager in a later version.",
+        ));
+    }
+    const SITE: &str = "https://nginx.org";
+    let page = client
+        .get(format!("{SITE}/en/download.html"))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(http)?
+        .text()
+        .await
+        .map_err(http)?;
+    // In page order: mainline first, then stable, then legacy.
+    let mut releases: Vec<Release> = Vec::new();
+    for href in page.split("href=\"").skip(1).filter_map(|s| s.split('"').next()) {
+        let Some(version) = href.strip_prefix("/download/nginx-").and_then(|v| v.strip_suffix(".zip")) else {
+            continue;
+        };
+        if releases.iter().any(|r| r.version == version) {
+            continue;
+        }
+        let label = match releases.len() {
+            0 => Some("Mainline".to_string()),
+            1 => Some("Stable".to_string()),
+            _ => None,
+        };
+        releases.push(Release {
+            runtime: Runtime::Nginx,
+            version: version.to_string(),
+            url: format!("{SITE}{href}"),
+            sha256: None,
+            archive: Archive::Zip,
+            label,
+        });
+        if releases.len() == 4 {
+            break;
+        }
+    }
+    if releases.is_empty() {
+        return Err(Error::msg("could not find Nginx builds on nginx.org"));
+    }
+    Ok(releases)
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {

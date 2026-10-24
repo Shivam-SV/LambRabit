@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import { api, type Site } from "../lib/api";
+import { api, type Server, type Site } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { Button, Card, PageHeader, Switch } from "../components/ui";
 
@@ -162,14 +162,16 @@ function SiteCard({ site }: { site: Site }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
-  const toggleSsl = useMutation({
-    mutationFn: (ssl: boolean) => api.setSiteSsl(site.name, ssl),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["sites"] });
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-    onError,
-  });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
+  const phpVersions = installed.data?.find((i) => i.runtime === "php")?.versions ?? [];
+  const onSuccess = () => {
+    for (const key of ["sites", "settings", "services", "php-status"]) queryClient.invalidateQueries({ queryKey: [key] });
+  };
+  const toggleSsl = useMutation({ mutationFn: (ssl: boolean) => api.setSiteSsl(site.name, ssl), onSuccess, onError });
+  const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
+  const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
+  const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
   const servesPublic = site.docroot !== site.path;
 
   return (
@@ -194,13 +196,41 @@ function SiteCard({ site }: { site: Site }) {
         {servesPublic && <div className="mt-0.5 text-xs">Serving the public/ folder</div>}
       </div>
 
-      <div className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2">
-        <span className="text-sm font-medium">HTTPS</span>
-        <Switch
-          checked={site.ssl}
-          onChange={(v) => toggleSsl.mutate(v)}
-          label={`HTTPS for ${site.domain}`}
-        />
+      <div className={clsx("divide-y divide-line rounded-xl bg-surface-2 text-sm", busy && "opacity-60")}>
+        <label className="flex items-center justify-between gap-3 px-3 py-2">
+          <span className="font-medium">PHP</span>
+          <select
+            value={site.php ?? ""}
+            disabled={busy}
+            onChange={(e) => setPhp.mutate(e.target.value || null)}
+            className="min-w-0 rounded-md border border-line bg-surface px-2 py-1 text-sm"
+          >
+            <option value="">Default ({settings.data?.versions.php ?? "none"})</option>
+            {phpVersions.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+        {settings.data?.webServer === "both" && (
+          <label className="flex items-center justify-between gap-3 px-3 py-2">
+            <span className="font-medium">Server</span>
+            <select
+              value={site.server}
+              disabled={busy}
+              onChange={(e) => setServer.mutate(e.target.value as Server)}
+              className="rounded-md border border-line bg-surface px-2 py-1 text-sm"
+            >
+              <option value="apache">Apache</option>
+              <option value="nginx">Nginx</option>
+            </select>
+          </label>
+        )}
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="font-medium">HTTPS</span>
+          <Switch checked={site.ssl} onChange={(v) => toggleSsl.mutate(v)} label={`HTTPS for ${site.domain}`} />
+        </div>
       </div>
 
       <div className="mt-auto flex gap-2">

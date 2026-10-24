@@ -10,6 +10,7 @@ import { Button, PageHeader, Switch } from "../components/ui";
 const services: { id: LogService | "all"; label: string }[] = [
   { id: "all", label: "All services" },
   { id: "apache", label: "Apache" },
+  { id: "nginx", label: "Nginx" },
   { id: "php", label: "PHP" },
   { id: "mariadb", label: "MariaDB" },
   { id: "mailpit", label: "Mailpit" },
@@ -18,6 +19,7 @@ const services: { id: LogService | "all"; label: string }[] = [
 
 const badge: Record<LogService, { label: string; className: string }> = {
   apache: { label: "Apache", className: "bg-rose-500/20 text-rose-300" },
+  nginx: { label: "Nginx", className: "bg-emerald-500/20 text-emerald-300" },
   php: { label: "PHP", className: "bg-indigo-500/25 text-indigo-300" },
   mariadb: { label: "MariaDB", className: "bg-amber-500/20 text-amber-300" },
   mailpit: { label: "Mailpit", className: "bg-sky-500/20 text-sky-300" },

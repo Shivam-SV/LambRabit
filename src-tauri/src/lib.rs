@@ -4,6 +4,7 @@ mod diagnose;
 mod error;
 mod layout;
 mod logs;
+mod php;
 mod procgroup;
 mod runtimes;
 mod services;
@@ -52,6 +53,7 @@ fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<Stri
         Runtime::Apache => &mut settings.versions.apache,
         Runtime::Php => &mut settings.versions.php,
         Runtime::Mariadb => &mut settings.versions.mariadb,
+        Runtime::Nginx => &mut settings.versions.nginx,
         Runtime::Mailpit => &mut settings.versions.mailpit,
         Runtime::Adminer => &mut settings.versions.adminer,
         Runtime::Phpmyadmin => &mut settings.versions.phpmyadmin,
@@ -62,8 +64,9 @@ fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<Stri
 fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
     match runtime {
         Runtime::Apache => &[ServiceKind::Apache],
-        Runtime::Php if cfg!(windows) => &[ServiceKind::Apache],
-        Runtime::Php => &[ServiceKind::PhpFpm],
+        Runtime::Nginx => &[ServiceKind::Nginx],
+        // PHP pools are owned by the web servers; restarting them restarts PHP.
+        Runtime::Php => &[ServiceKind::Apache, ServiceKind::Nginx],
         Runtime::Mariadb => &[ServiceKind::Mariadb],
         Runtime::Mailpit => &[ServiceKind::Mailpit],
         // Served by Apache through their own virtual hosts.
@@ -109,6 +112,7 @@ async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
 
 #[tauri::command]
 async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
+    check_ports(&settings)?;
     let layout = Layout::new(&settings.root_dir);
     layout.ensure()?;
     reconcile_versions(&mut settings);
@@ -117,7 +121,62 @@ async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings:
     *state.ca_trusted.lock().await = None;
     logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
     logs::system(&app, logs::Level::Info, "Settings saved");
+    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+        if !kind.enabled(&settings) && state.supervisor.is_running(kind).await {
+            logs::system(&app, logs::Level::Info, format!("{} is switched off in Settings; stopping it", kind.label()));
+            state.supervisor.stop(&app, kind).await;
+        }
+    }
     Ok(settings)
+}
+
+/// Rejects settings where two services would listen on the same port.
+fn check_ports(settings: &Settings) -> Result<()> {
+    use config::Server;
+    let p = &settings.ports;
+    let mut used: Vec<(u16, String)> = vec![(p.mysql, "MariaDB".into()), (p.mail_smtp, "Mailpit SMTP".into()), (p.mail_ui, "Mailpit inbox".into())];
+    for server in [Server::Apache, Server::Nginx] {
+        if settings.server_enabled(server) {
+            let (http, https) = settings.server_ports(server);
+            let name = if server == Server::Apache { "Apache" } else { "Nginx" };
+            used.push((http, format!("{name} HTTP")));
+            used.push((https, format!("{name} HTTPS")));
+        }
+    }
+    let php_block = p.php_fpm..p.php_fpm.saturating_add(100);
+    for (i, (port, a)) in used.iter().enumerate() {
+        if let Some((_, b)) = used[i + 1..].iter().find(|(q, _)| q == port) {
+            return Err(Error::msg(format!("{a} and {b} are both set to port {port}. Give each its own port.")));
+        }
+        if php_block.contains(port) {
+            return Err(Error::msg(format!(
+                "{a} (port {port}) overlaps the PHP FastCGI ports ({}-{}). Move one of them.",
+                php_block.start,
+                php_block.end - 1
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Restarts whichever web servers are running, so they (and their PHP pools) pick up
+/// changed sites or PHP versions together.
+async fn restart_web_servers(app: &AppHandle, state: &AppState) -> Result<()> {
+    let mut running = Vec::new();
+    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+        if state.supervisor.is_running(kind).await {
+            state.supervisor.stop(app, kind).await;
+            running.push(kind);
+        }
+    }
+    for &kind in &running {
+        state.supervisor.wait_stopped(kind).await;
+    }
+    let (settings, layout) = state.snapshot().await;
+    for kind in running {
+        state.supervisor.start(app, kind, &settings, &layout).await?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -156,7 +215,7 @@ async fn start_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Str
     let (settings, layout) = state.snapshot().await;
     let mut errors = Vec::new();
     for info in state.supervisor.list(&settings, &layout).await {
-        if !info.installed {
+        if !info.installed || !info.kind.enabled(&settings) {
             continue;
         }
         if let Err(e) = state.supervisor.start(&app, info.kind, &settings, &layout).await {
@@ -205,8 +264,13 @@ struct SitesInfo {
 async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
     let (settings, layout) = state.snapshot().await;
     let served = sites::served(&settings, &layout);
-    let needs_apply =
-        state.supervisor.is_running(ServiceKind::Apache).await && sites::vhosts_stale(&settings, &layout, &served);
+    let plan = php::plan(&settings, &layout, &served);
+    let mut needs_apply = false;
+    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+        if state.supervisor.is_running(kind).await {
+            needs_apply |= sites::config_stale(&settings, &layout, &served, &plan, kind.web_server().unwrap());
+        }
+    }
     let hosts_ok = !sites::needs_hosts_file(&settings) || sites::hosts_in_sync(&served);
     let (tools, sites): (Vec<_>, Vec<_>) = served.into_iter().partition(|s| s.tool.is_some());
     let ca_trusted = if sites.iter().any(|s| s.ssl) && ssl::ca_thumbprint(&layout).is_some() {
@@ -238,10 +302,10 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
 async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let (settings, layout) = state.snapshot().await;
     logs::system(&app, logs::Level::Info, "Applying site changes");
-    if state.supervisor.is_running(ServiceKind::Apache).await {
-        state.supervisor.stop(&app, ServiceKind::Apache).await;
-        state.supervisor.wait_stopped(ServiceKind::Apache).await;
-        state.supervisor.start(&app, ServiceKind::Apache, &settings, &layout).await
+    let any_running =
+        state.supervisor.is_running(ServiceKind::Apache).await || state.supervisor.is_running(ServiceKind::Nginx).await;
+    if any_running {
+        restart_web_servers(&app, &state).await
     } else {
         let sites = sites::served(&settings, &layout);
         if sites::needs_hosts_file(&settings) && !sites::hosts_in_sync(&sites) {
@@ -256,13 +320,39 @@ async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
 async fn set_site_ssl(app: AppHandle, state: State<'_, AppState>, name: String, ssl: bool) -> Result<()> {
     state.update_settings(|s| s.sites.entry(name.clone()).or_default().ssl = Some(ssl)).await?;
     logs::system(&app, logs::Level::Info, format!("HTTPS {} for {name}", if ssl { "enabled" } else { "disabled" }));
-    if state.supervisor.is_running(ServiceKind::Apache).await {
-        let (settings, layout) = state.snapshot().await;
-        state.supervisor.stop(&app, ServiceKind::Apache).await;
-        state.supervisor.wait_stopped(ServiceKind::Apache).await;
-        state.supervisor.start(&app, ServiceKind::Apache, &settings, &layout).await?;
+    restart_web_servers(&app, &state).await
+}
+
+/// Sets a site's PHP version (None = follow the active version).
+#[tauri::command]
+async fn set_site_php(app: AppHandle, state: State<'_, AppState>, name: String, version: Option<String>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    if let Some(v) = &version {
+        if !runtimes::installed(&layout, Runtime::Php).contains(v) {
+            return Err(Error::msg(format!("PHP {v} is not installed")));
+        }
     }
-    Ok(())
+    let label = version.clone().unwrap_or_else(|| "the active version".into());
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().php = version).await?;
+    logs::system(&app, logs::Level::Info, format!("{name} now uses PHP {label}"));
+    restart_web_servers(&app, &state).await
+}
+
+/// Picks the web server for a site when both are enabled.
+#[tauri::command]
+async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: String, server: Option<config::Server>) -> Result<()> {
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().server = server).await?;
+    logs::system(&app, logs::Level::Info, format!("{name} is now served by {}", match server {
+        Some(config::Server::Nginx) => "Nginx",
+        Some(config::Server::Apache) => "Apache",
+        None => "the default server",
+    }));
+    restart_web_servers(&app, &state).await
+}
+
+#[tauri::command]
+async fn php_status(state: State<'_, AppState>) -> Result<Vec<php::PoolStatus>> {
+    Ok(state.supervisor.php.status().await)
 }
 
 /// Adds the local CA to the user's trust store (the OS asks for confirmation).
@@ -339,9 +429,9 @@ struct PortStatus {
 async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui)];
-    if !cfg!(windows) {
-        ports.push(("phpFpm", p.php_fpm));
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm)];
+    if settings.web_server == config::WebServer::Both {
+        ports.extend([("nginxHttp", p.nginx_http), ("nginxHttps", p.nginx_https)]);
     }
     let mut out = Vec::new();
     for (key, port) in ports {
@@ -351,6 +441,9 @@ async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
             if state.supervisor.is_running(kind).await && services::required_ports(kind, &settings, &layout).contains(&port) {
                 used_by_service = Some(kind.label());
             }
+        }
+        if state.supervisor.php.status().await.iter().any(|p| (p.port..p.port + p.workers).contains(&port)) {
+            used_by_service = Some("PHP");
         }
         let owner = if free || used_by_service.is_some() { None } else { diagnose::port_owner(port).await };
         out.push(PortStatus { key, port, free, used_by_service, owner });
@@ -419,6 +512,7 @@ async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String>
     let _ = writeln!(r, "\n## Environment\n");
     let _ = writeln!(r, "- Root: {}", layout.root().display());
     let _ = writeln!(r, "- Domain suffix: .{}", settings.tld);
+    let _ = writeln!(r, "- Web server: {:?}", settings.web_server);
     let _ = writeln!(r, "- HTTPS by default: {}", settings.https_by_default);
     let _ = writeln!(r, "- Manage hosts file: {}", settings.manage_hosts);
     let _ = writeln!(r, "- PHP mail() to Mailpit: {}", settings.route_mail);
@@ -464,12 +558,23 @@ async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String>
         let _ = writeln!(r, "| {} | {} | {status} |", p.key, p.port);
     }
 
-    let _ = writeln!(r, "\n## Apache configuration test\n");
-    let _ = match services::config_test(&settings, &layout).await {
-        None => writeln!(r, "Not run (Apache not installed or never started)."),
-        Some(Ok(())) => writeln!(r, "Syntax OK"),
-        Some(Err(e)) => writeln!(r, "```text\n{e}\n```"),
-    };
+    let _ = writeln!(r, "\n## PHP workers\n");
+    let pools = state.supervisor.php.status().await;
+    if pools.is_empty() {
+        let _ = writeln!(r, "None running (they start with a web server).");
+    }
+    for p in pools {
+        let _ = writeln!(r, "- PHP {}: {}/{} workers alive, ports {}-{}", p.version, p.alive, p.workers, p.port, p.port + p.workers - 1);
+    }
+
+    for kind in [ServiceKind::Apache, ServiceKind::Nginx] {
+        let _ = writeln!(r, "\n## {} configuration test\n", kind.label());
+        let _ = match services::config_test(kind, &settings, &layout).await {
+            None => writeln!(r, "Not run (not installed or never started)."),
+            Some(Ok(())) => writeln!(r, "Syntax OK"),
+            Some(Err(e)) => writeln!(r, "```text\n{e}\n```"),
+        };
+    }
 
     let served = sites::served(&settings, &layout);
     let _ = writeln!(r, "\n## Sites and HTTPS\n");
@@ -720,6 +825,9 @@ pub fn run() {
             list_sites,
             apply_sites,
             set_site_ssl,
+            set_site_php,
+            set_site_server,
+            php_status,
             trust_ca,
             open_db_client,
             runtime_catalog,

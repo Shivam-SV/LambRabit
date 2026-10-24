@@ -43,7 +43,7 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
 - **Activity logs**: existing System stream plus filters by severity and time range, and export (save dialog → `.log`/`.txt`).
 - **Diagnostics report**: OS and app versions, runtimes, ports and owners, config test output, hosts/CA status, recent errors; copy or save as a file, with user paths optionally redacted.
 
-### 6.2 Web servers
+### 6.2 Web servers ✅
 - **Apache, Nginx or both**: Nginx from nginx.org (Windows zips; macOS/Linux via own builds or package manager). PHP for Nginx runs as FastCGI (`php-cgi` pool on Windows, `php-fpm` elsewhere). With both enabled, each site picks its server; the second server gets its own ports (default 8080/8443) and the UI blocks overlapping ports before start.
 
 ### 6.3 Projects

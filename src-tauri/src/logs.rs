@@ -17,9 +17,11 @@ const KEEP: usize = 2000;
 const MAX_READ: u64 = 1024 * 1024;
 
 /// (file name in logs/, service, stream)
-const SOURCES: [(&str, &str, &str); 5] = [
+const SOURCES: [(&str, &str, &str); 7] = [
     ("apache-error.log", "apache", "error"),
     ("apache-access.log", "apache", "access"),
+    ("nginx-error.log", "nginx", "error"),
+    ("nginx-access.log", "nginx", "access"),
     ("mariadb-error.log", "mariadb", "error"),
     ("php-error.log", "php", "error"),
     ("php-fpm.log", "php", "error"),
@@ -96,7 +98,7 @@ const OWN_FILES: [(&str, &str, &str); 4] = [
     ("lampRabit.log", "system", "output"),
     ("apache-output.log", "apache", "output"),
     ("mariadb-output.log", "mariadb", "output"),
-    ("php-fpm-output.log", "php", "output"),
+    ("nginx-output.log", "nginx", "output"),
 ];
 /// How much of each file the Logs page loads.
 const HISTORY_BYTES: u64 = 96 * 1024;
