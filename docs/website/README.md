@@ -1,0 +1,99 @@
+# lampRabit website content pack
+
+Everything needed to build the lampRabit marketing and documentation website. The copy in these files is final-draft quality and can be used as-is or edited for tone.
+
+## What lampRabit is
+
+lampRabit is a free, open-source desktop app that runs a complete local PHP development environment: Apache or Nginx, PHP (several versions side by side), MariaDB, and developer tools like phpMyAdmin, Adminer and Mailpit. Every folder you put in `www/` becomes a site at `https://<folder>.test`, with a trusted local certificate. It is a modern alternative to XAMPP and Laragon, built with Rust and Tauri.
+
+**One-line pitch:** Your local PHP stack, without the setup.
+
+**Short description (about 160 characters, for meta tags):** lampRabit runs Apache or Nginx, PHP and MariaDB on your machine. Drop a folder in www, get https://yourapp.test. Free and open source.
+
+## Files in this pack
+
+| File | Use it for |
+|---|---|
+| [features.md](features.md) | Features page, homepage highlights, comparison table |
+| [installation.md](installation.md) | Download / Install page and "Getting started" docs |
+| [migrate-from-xampp.md](migrate-from-xampp.md) | Docs page: moving from XAMPP |
+| [migrate-from-laragon.md](migrate-from-laragon.md) | Docs page: moving from Laragon |
+| [faq.md](faq.md) | FAQ and troubleshooting page |
+
+## Feature status
+
+lampRabit is under active development. Every feature in these files is marked:
+
+- **Available**: in the app today.
+- **Coming soon**: designed and scheduled; it will ship before or shortly after the first public release.
+
+Show both on the website (for example a small "Coming soon" badge). Don't hide coming-soon features, but don't present them as available either. The app team will tell you when a feature moves to Available, so the badge can be removed.
+
+Some features are limited by platform. Where that's the case, the feature text says so. The app runs on Windows, macOS and Linux, but **one-click runtime downloads currently cover Windows fully; macOS and Linux downloads are partial** (see the platform table in [installation.md](installation.md)).
+
+## Suggested site map
+
+1. **Home**: hero (pitch, download button, screenshot of the Overview page), three to six feature highlights, "Switching from XAMPP or Laragon?" call-out, footer.
+2. **Features**: grouped as in [features.md](features.md).
+3. **Download**: OS-detected download button, system requirements, links to installation docs.
+4. **Docs**
+   - Getting started (installation.md)
+   - Migrating from XAMPP
+   - Migrating from Laragon
+   - FAQ and troubleshooting
+5. **Changelog**: placeholder until releases start (GitHub Releases can feed it).
+6. **GitHub** link: https://github.com/Shivam-SV/LambRabit
+
+## Brand
+
+### Name
+
+Always written **lampRabit**: lowercase "lamp", capital "R", single "b". In the logo lockup, "Rabit" is set in the accent colour.
+
+### Logo
+
+- Mark only (no wordmark): `public/logo.svg` in the repository.
+- Original with wordmark: `public/LampRabit-logo.svg`.
+- App icon (white rounded tile): `src-tauri/app-icon.svg`; PNG sizes in `src-tauri/icons/`.
+
+The mark is a charcoal rabbit head with mint ears and `< >` code brackets for eyes. On dark backgrounds the app lightens the head to `#3a4452` so it stays visible.
+
+### Colours
+
+| Token | Light theme | Dark theme | Use |
+|---|---|---|---|
+| Background | `#f4f7f6` | `#13171d` | Page background |
+| Surface | `#ffffff` | `#1b2028` | Cards |
+| Surface 2 | `#eef2f1` | `#232a34` | Subtle fills |
+| Border | `#dde3e1` | `#2d3540` | Card borders, dividers |
+| Text | `#1b2028` | `#e7ecf1` | Body text |
+| Muted text | `#5d6775` | `#8d98a7` | Secondary text |
+| Accent | `#168a64` | `#59d1a2` | Buttons, links, highlights |
+| Accent soft | `#e2f5ed` | mint at 12% opacity | Pills, selected states |
+| Danger | `#d1435b` | `#ef6b7f` | Errors |
+
+Brand core: charcoal `#1b2028`, mint `#59d1a2`, white. In light mode the accent is the deeper green `#168a64` because mint on white fails contrast for text.
+
+Service colours used across the app (icons and badges): Apache rose `#f43f5e`, Nginx emerald `#059669`, PHP indigo `#6366f1`, MariaDB amber `#d97706`, Mailpit sky `#0ea5e9`, Adminer teal `#14b8a6`, phpMyAdmin orange `#f97316`.
+
+### Type
+
+Inter (variable), with system UI fonts as fallback. Headings bold to extra-bold with slightly tight tracking; code and ports in a monospace (JetBrains Mono / Cascadia Code / Consolas).
+
+### Voice
+
+Plain, friendly, specific. Say what happens ("Drop a folder in www and it's live at myapp.test") rather than abstract claims ("seamless developer experience"). Avoid jargon where a plain word works; when a technical term matters to developers (FastCGI, vhost), use it.
+
+## Screenshots to capture
+
+Take these from the app in both light and dark themes at 1280×860:
+
+1. Overview with Apache, MariaDB and Mailpit running (hero image).
+2. Services page: "Your stack" diagram with services running, plus a version rail.
+3. Sites page with two or three sites, one on a custom PHP version.
+4. Logs page with a mix of Apache, PHP and System lines.
+5. Settings: Web server card set to "Both".
+6. A service card showing a port-conflict problem panel (start a service while another program holds its port).
+7. Diagnostics dialog.
+
+Use project names like `shop`, `blog`, `api` rather than personal folders, and keep the Windows user name out of shots (Diagnostics has a "Hide user name" switch).
