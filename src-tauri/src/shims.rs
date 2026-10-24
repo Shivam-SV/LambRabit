@@ -24,19 +24,23 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     for entry in std::fs::read_dir(&dir)?.flatten() {
         let _ = std::fs::remove_file(entry.path());
     }
-    if let Some(v) = &settings.versions.php {
-        let php = layout.bin("php", v).join(exe("php"));
-        if php.exists() {
-            let mut args = Vec::new();
-            if let Ok(ini) = configs::write_php(settings, layout, v, settings.ports.php_fpm) {
-                args = vec!["-c".to_string(), path(&ini)];
+    // Sites with their own PHP version get it when the command runs inside their folder.
+    let mut php_cases: Vec<Case> = settings
+        .sites
+        .iter()
+        .filter_map(|(name, site)| Some((layout.www().join(name), site.php.as_ref()?)))
+        .filter(|(_, v)| Some(*v) != settings.versions.php.as_ref())
+        .filter_map(|(folder, v)| php_case(settings, layout, v, Some(folder)))
+        .collect();
+    php_cases.extend(settings.versions.php.as_ref().and_then(|v| php_case(settings, layout, v, None)));
+    if php_cases.iter().any(|c| c.folder.is_none()) {
+        shim(&dir, "php", &php_cases)?;
+        let phar = layout.root().join("bin").join("composer").join("composer.phar");
+        if phar.exists() {
+            for case in &mut php_cases {
+                case.args.push(path(&phar));
             }
-            shim(&dir, "php", &php, &args)?;
-            let phar = layout.root().join("bin").join("composer").join("composer.phar");
-            if phar.exists() {
-                args.push(path(&phar));
-                shim(&dir, "composer", &php, &args)?;
-            }
+            shim(&dir, "composer", &php_cases)?;
         }
     }
     if let Some(v) = &settings.versions.mariadb {
@@ -48,7 +52,7 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
         for name in MARIADB_TOOLS {
             let target = bin.join(exe(name));
             if target.exists() {
-                shim(&dir, name, &target, &args)?;
+                shim(&dir, name, &[Case { folder: None, target, args: args.clone() }])?;
             }
         }
     }
@@ -59,15 +63,69 @@ fn path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-fn shim(dir: &Path, name: &str, target: &Path, args: &[String]) -> Result<()> {
+/// Run `target args…` when the working directory is inside `folder` (or anywhere, for None).
+struct Case {
+    folder: Option<PathBuf>,
+    target: PathBuf,
+    args: Vec<String>,
+}
+
+fn php_case(settings: &Settings, layout: &Layout, version: &str, folder: Option<PathBuf>) -> Option<Case> {
+    let target = layout.bin("php", version).join(exe("php"));
+    if !target.exists() {
+        return None;
+    }
+    let args = match configs::write_php(settings, layout, version, settings.ports.php_fpm) {
+        Ok(ini) => vec!["-c".to_string(), path(&ini)],
+        Err(_) => Vec::new(),
+    };
+    Some(Case { folder, target, args })
+}
+
+/// Writes a shim that picks the first case whose folder contains the working directory;
+/// the case without a folder is the fallback.
+fn shim(dir: &Path, name: &str, cases: &[Case]) -> Result<()> {
+    let fallback = cases.iter().find(|c| c.folder.is_none());
     if cfg!(windows) {
-        let args: String = args.iter().map(|a| format!(" \"{a}\"")).collect();
-        std::fs::write(dir.join(format!("{name}.cmd")), format!("@\"{}\"{args} %*\r\n", target.display()))?;
+        let run = |c: &Case| {
+            let args: String = c.args.iter().map(|a| format!(" \"{a}\"")).collect();
+            format!("\"{}\"{args} %*\r\nexit /b %ERRORLEVEL%\r\n", c.target.display())
+        };
+        let mut script = String::from("@echo off\r\nsetlocal\r\nset \"LR_HERE=%CD%\\\"\r\n");
+        let mut labels = String::new();
+        for (i, case) in cases.iter().enumerate() {
+            if let Some(folder) = &case.folder {
+                // Compare the start of %CD%\ with the folder, case-insensitively.
+                let prefix = format!("{}\\", folder.display());
+                let n = prefix.chars().count();
+                script.push_str(&format!("if /I \"%LR_HERE:~0,{n}%\"==\"{prefix}\" goto site{i}\r\n"));
+                labels.push_str(&format!(":site{i}\r\n{}", run(case)));
+            }
+        }
+        if let Some(c) = fallback {
+            script.push_str(&run(c));
+        }
+        script.push_str(&labels);
+        std::fs::write(dir.join(format!("{name}.cmd")), script)?;
     } else {
-        let args: String = args.iter().map(|a| format!(" '{}'", a.replace('\'', r"'\''"))).collect();
+        let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let run = |c: &Case| {
+            let args: String = c.args.iter().map(|a| format!(" {}", quote(a))).collect();
+            format!("exec {}{args} \"$@\"", quote(&c.target.to_string_lossy()))
+        };
+        let mut script = String::from("#!/bin/sh\ncase \"$PWD/\" in\n");
+        for case in cases {
+            if let Some(folder) = &case.folder {
+                script.push_str(&format!("  {}*) {} ;;\n", quote(&format!("{}/", folder.display())), run(case)));
+            }
+        }
+        script.push_str("esac\n");
+        if let Some(c) = fallback {
+            script.push_str(&run(c));
+            script.push('\n');
+        }
         let file = dir.join(name);
-        let target = target.to_string_lossy().replace('\'', r"'\''");
-        std::fs::write(&file, format!("#!/bin/sh\nexec '{target}'{args} \"$@\"\n"))?;
+        std::fs::write(&file, script)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

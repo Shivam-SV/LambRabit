@@ -52,7 +52,7 @@ Start lampRabit when you sign in (it opens quietly in the tray), and optionally 
 A terminal with PHP, Composer and the MariaDB client on the PATH, from the title bar, the tray or any site card (opens in the project folder).
 
 ### PHP, Composer and MariaDB on your PATH (Available)
-One switch in Settings puts `php`, `composer`, `mysql`, `mariadb`, `mysqldump` and friends on your PATH, so they work in any terminal, IDE or script. They always run the versions you've made active, with lampRabit's php.ini and database port. No admin rights needed; on macOS and Linux it's a marked block in your shell profile that's removed cleanly when you switch it off.
+One switch in Settings puts `php`, `composer`, `mysql`, `mariadb`, `mysqldump` and friends on your PATH, so they work in any terminal, IDE or script. They always run the versions you've made active, with lampRabit's php.ini and database port, and inside a site that has its own PHP version, `php` and `composer` use that version automatically. No admin rights needed; on macOS and Linux it's a marked block in your shell profile that's removed cleanly when you switch it off.
 
 ### Open in editor (Available)
 Open any project in VS Code, Cursor, PhpStorm, Sublime Text, Zed or another editor command of your choice.
