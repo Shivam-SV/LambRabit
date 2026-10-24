@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownToLine, Check, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, Check, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
 import {
   api,
+  coreRuntimes,
   runtimeLabels,
+  toolRuntimes,
+  type SitesInfo,
   type InstalledRuntime,
   type Release,
   type Runtime,
@@ -18,9 +22,20 @@ const roles: Record<Runtime, { blurb: string; source: string }> = {
   apache: { blurb: "Serves your sites", source: "Apache Lounge builds" },
   php: { blurb: "Runs your code", source: "Thread-safe builds from windows.php.net" },
   mariadb: { blurb: "Stores your data", source: "Official MariaDB releases" },
+  mailpit: { blurb: "Catches outgoing mail", source: "Local SMTP server with a web inbox" },
+  adminer: { blurb: "Database admin", source: "A single-file database manager" },
+  phpmyadmin: { blurb: "Database admin", source: "The classic MySQL/MariaDB web interface" },
 };
 
-const order: Runtime[] = ["apache", "php", "mariadb"];
+const order = coreRuntimes;
+
+/** Where each tool opens: its own domain when the hosts file knows it, otherwise localhost. */
+function toolUrl(runtime: Runtime, info: SitesInfo | undefined, mailUi: number | undefined): string | undefined {
+  if (runtime === "mailpit") return mailUi ? `http://localhost:${mailUi}/` : undefined;
+  const tool = info?.tools.find((t) => t.tool === runtime);
+  if (!tool) return undefined;
+  return info?.hostsOk ? tool.url : `http://localhost/${runtime}/`;
+}
 
 const versionKey = (v: string) => v.split(".").map(Number);
 const newestFirst = (a: string, b: string) => {
@@ -34,6 +49,8 @@ const newestFirst = (a: string, b: string) => {
 export default function Services() {
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
+  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
 
   return (
@@ -43,6 +60,21 @@ export default function Services() {
         <StackDiagram installed={installed.data ?? []} services={services.data ?? []} />
         {order.map((r) => (
           <RuntimeRail key={r} runtime={r} installed={find(r)} />
+        ))}
+
+        <div className="pt-4">
+          <h2 className="text-xl font-bold tracking-tight">Developer tools</h2>
+          <p className="mt-1 text-muted">
+            Optional extras. Database tools are served by Apache; Mailpit runs as its own service.
+          </p>
+        </div>
+        {toolRuntimes.map((r) => (
+          <RuntimeRail
+            key={r}
+            runtime={r}
+            installed={find(r)}
+            openUrl={toolUrl(r, sites.data, settings.data?.ports.mailUi)}
+          />
         ))}
       </div>
     </>
@@ -57,7 +89,7 @@ function StackDiagram({ installed, services }: { installed: InstalledRuntime[]; 
   const phpFpm = svc("php-fpm");
   const phpUp = phpFpm ? phpFpm.state === "running" : apacheUp;
 
-  const status: Record<Runtime, { up: boolean; text: string }> = {
+  const status: Record<string, { up: boolean; text: string }> = {
     apache: { up: apacheUp, text: apacheUp ? `Running on port ${svc("apache")?.port}` : "Stopped" },
     php: {
       up: phpUp,
@@ -125,7 +157,16 @@ interface Node {
 }
 
 /** Every known version of one runtime as stops on a rail, newest first. */
-function RuntimeRail({ runtime, installed }: { runtime: Runtime; installed?: InstalledRuntime }) {
+function RuntimeRail({
+  runtime,
+  installed,
+  openUrl: url,
+}: {
+  runtime: Runtime;
+  installed?: InstalledRuntime;
+  /** Shown as an Open button once the tool is installed. */
+  openUrl?: string;
+}) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const installs = useAppStore((s) => s.installs);
@@ -181,6 +222,11 @@ function RuntimeRail({ runtime, installed }: { runtime: Runtime; installed?: Ins
             {catalog.data && ` · ${catalog.data.filter((r) => !have.includes(r.version)).length} available`}
           </p>
         </div>
+        {url && installed?.active && (
+          <Button size="sm" variant="soft" onClick={() => openUrl(url).catch(onError)}>
+            <ExternalLink size={14} /> Open
+          </Button>
+        )}
         <Button size="sm" onClick={() => catalog.refetch()} disabled={catalog.isFetching} aria-label="Check for new versions">
           <RefreshCw size={14} className={clsx(catalog.isFetching && "animate-spin")} />
         </Button>

@@ -23,26 +23,43 @@ pub enum Runtime {
     Apache,
     Php,
     Mariadb,
+    /// Developer tools: a mail catcher and two database web UIs.
+    Mailpit,
+    Adminer,
+    Phpmyadmin,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 3] = [Runtime::Apache, Runtime::Php, Runtime::Mariadb];
+    pub const ALL: [Runtime; 6] = [
+        Runtime::Apache,
+        Runtime::Php,
+        Runtime::Mariadb,
+        Runtime::Mailpit,
+        Runtime::Adminer,
+        Runtime::Phpmyadmin,
+    ];
 
     pub fn id(self) -> &'static str {
         match self {
             Self::Apache => "apache",
             Self::Php => "php",
             Self::Mariadb => "mariadb",
+            Self::Mailpit => "mailpit",
+            Self::Adminer => "adminer",
+            Self::Phpmyadmin => "phpmyadmin",
         }
     }
 
     /// File that must exist inside an installed version's directory.
-    fn marker(self) -> PathBuf {
+    pub fn marker(self) -> PathBuf {
         match self {
             Self::Apache => Path::new("bin").join(exe("httpd")),
             Self::Php if cfg!(windows) => PathBuf::from(exe("php")),
             Self::Php => PathBuf::from("php-fpm"),
             Self::Mariadb => Path::new("bin").join(exe("mariadbd")),
+            Self::Mailpit => PathBuf::from(exe("mailpit")),
+            Self::Adminer => PathBuf::from("adminer.php"),
+            Self::Phpmyadmin => PathBuf::from("index.php"),
         }
     }
 }
@@ -52,6 +69,8 @@ impl Runtime {
 pub enum Archive {
     Zip,
     TarGz,
+    /// A single file, saved as the runtime's marker file.
+    File,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +110,9 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::Php => php_releases(client).await?,
         Runtime::Apache => apache_releases(client).await?,
         Runtime::Mariadb => mariadb_releases(client).await?,
+        Runtime::Mailpit => mailpit_releases(client).await?,
+        Runtime::Adminer => adminer_releases(client).await?,
+        Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
@@ -240,6 +262,93 @@ async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     Ok(futures_util::future::join_all(fetches).await.into_iter().flatten().collect())
 }
 
+async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value> {
+    client
+        .get(url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(http)?
+        .json()
+        .await
+        .map_err(http)
+}
+
+/// Latest GitHub release of `repo`, picking the asset `pick` accepts. GitHub reports a
+/// sha256 digest for each asset.
+async fn github_latest(
+    client: &reqwest::Client,
+    runtime: Runtime,
+    repo: &str,
+    archive: Archive,
+    pick: impl Fn(&str, &str) -> bool,
+) -> Result<Vec<Release>> {
+    let latest = get_json(client, &format!("https://api.github.com/repos/{repo}/releases/latest")).await?;
+    let version = latest["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+    let asset = latest["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|a| a["name"].as_str().is_some_and(|n| pick(n, &version)))
+        .ok_or_else(|| Error::msg(format!("no download for this platform in {repo} {version}")))?;
+    Ok(vec![Release {
+        runtime,
+        url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
+        sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+        version,
+        archive,
+        label: None,
+    }])
+}
+
+async fn mailpit_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let os = match std::env::consts::OS {
+        "windows" => "windows",
+        "macos" => "darwin",
+        "linux" => "linux",
+        _ => return Err(unsupported("Mailpit")),
+    };
+    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
+    let (ext, archive) = if cfg!(windows) { ("zip", Archive::Zip) } else { ("tar.gz", Archive::TarGz) };
+    let name = format!("mailpit-{os}-{arch}.{ext}");
+    github_latest(client, Runtime::Mailpit, "axllent/mailpit", archive, |n, _| n == name).await
+}
+
+async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    // The all-drivers, all-languages single file.
+    github_latest(client, Runtime::Adminer, "vrana/adminer", Archive::File, |n, v| n == format!("adminer-{v}.php"))
+        .await
+}
+
+async fn phpmyadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let info = get_json(client, "https://www.phpmyadmin.net/home_page/version.json").await?;
+    let version = info["version"].as_str().ok_or_else(|| Error::msg("unexpected phpMyAdmin version data"))?;
+    let php = info["releases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|r| r["version"] == version)
+        .and_then(|r| r["php_versions"].as_str())
+        // ">=7.2,<8.4" -> "PHP <8.4": the upper bound is what users run into.
+        .map(|p| format!("PHP {}", p.rsplit(',').next().unwrap_or(p).trim()));
+    let url = format!("https://files.phpmyadmin.net/phpMyAdmin/{version}/phpMyAdmin-{version}-all-languages.zip");
+    let sha256 = match client.get(format!("{url}.sha256")).send().await {
+        Ok(r) if r.status().is_success() => {
+            r.text().await.ok().and_then(|t| t.split_whitespace().next().map(str::to_string))
+        }
+        _ => None,
+    };
+    Ok(vec![Release {
+        runtime: Runtime::Phpmyadmin,
+        version: version.to_string(),
+        url,
+        sha256,
+        archive: Archive::Zip,
+        label: php,
+    }])
+}
+
 pub fn installed(layout: &Layout, runtime: Runtime) -> Vec<String> {
     let dir = layout.root().join("bin").join(runtime.id());
     let mut versions: Vec<String> = std::fs::read_dir(dir)
@@ -334,8 +443,14 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
     if scratch.exists() {
         std::fs::remove_dir_all(scratch)?;
     }
+    if let Archive::File = kind {
+        std::fs::create_dir_all(dest)?;
+        std::fs::copy(archive, dest.join(marker))?;
+        return Ok(());
+    }
     let file = std::fs::File::open(archive)?;
     match kind {
+        Archive::File => unreachable!(),
         Archive::Zip => zip::ZipArchive::new(file)
             .and_then(|mut z| z.extract(scratch))
             .map_err(|e| Error::msg(format!("could not extract archive: {e}")))?,

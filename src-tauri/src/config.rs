@@ -20,6 +20,8 @@ pub struct Settings {
     pub https_by_default: bool,
     /// Keep the system hosts file in sync with the site list when Apache starts.
     pub manage_hosts: bool,
+    /// Point PHP's mail() at Mailpit while Mailpit is installed.
+    pub route_mail: bool,
     /// Per-site overrides keyed by folder name.
     pub sites: BTreeMap<String, SiteSettings>,
 }
@@ -38,6 +40,10 @@ pub struct Ports {
     pub mysql: u16,
     /// Only used on platforms where PHP runs as php-fpm (macOS/Linux).
     pub php_fpm: u16,
+    /// Mailpit's SMTP server, where PHP and frameworks send mail.
+    pub mail_smtp: u16,
+    /// Mailpit's web inbox.
+    pub mail_ui: u16,
 }
 
 /// Active version per runtime; `None` means not installed yet.
@@ -47,6 +53,9 @@ pub struct Versions {
     pub apache: Option<String>,
     pub php: Option<String>,
     pub mariadb: Option<String>,
+    pub mailpit: Option<String>,
+    pub adminer: Option<String>,
+    pub phpmyadmin: Option<String>,
 }
 
 impl Default for Settings {
@@ -58,6 +67,7 @@ impl Default for Settings {
             versions: Versions::default(),
             https_by_default: true,
             manage_hosts: true,
+            route_mail: true,
             sites: BTreeMap::new(),
         }
     }
@@ -65,7 +75,7 @@ impl Default for Settings {
 
 impl Default for Ports {
     fn default() -> Self {
-        Self { http: 80, https: 443, mysql: 3306, php_fpm: 9000 }
+        Self { http: 80, https: 443, mysql: 3306, php_fpm: 9000, mail_smtp: 1025, mail_ui: 8025 }
     }
 }
 

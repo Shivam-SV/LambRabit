@@ -29,6 +29,8 @@ pub enum ServiceKind {
     Mariadb,
     /// Windows loads PHP into Apache as a module; elsewhere it runs as php-fpm.
     PhpFpm,
+    /// Catches outgoing mail (SMTP) and shows it in a web inbox.
+    Mailpit,
 }
 
 impl ServiceKind {
@@ -37,6 +39,7 @@ impl ServiceKind {
         if !cfg!(windows) {
             kinds.push(Self::PhpFpm);
         }
+        kinds.push(Self::Mailpit);
         kinds
     }
 
@@ -45,6 +48,7 @@ impl ServiceKind {
             Self::Apache => "apache",
             Self::Mariadb => "mariadb",
             Self::PhpFpm => "php-fpm",
+            Self::Mailpit => "mailpit",
         }
     }
 
@@ -53,6 +57,7 @@ impl ServiceKind {
             Self::Apache => "Apache",
             Self::Mariadb => "MariaDB",
             Self::PhpFpm => "PHP-FPM",
+            Self::Mailpit => "Mailpit",
         }
     }
 
@@ -61,6 +66,7 @@ impl ServiceKind {
             Self::Apache => "apache",
             Self::Mariadb => "mariadb",
             Self::PhpFpm => "php",
+            Self::Mailpit => "mailpit",
         }
     }
 
@@ -69,6 +75,7 @@ impl ServiceKind {
             Self::Apache => settings.versions.apache.clone(),
             Self::Mariadb => settings.versions.mariadb.clone(),
             Self::PhpFpm => settings.versions.php.clone(),
+            Self::Mailpit => settings.versions.mailpit.clone(),
         }
     }
 
@@ -77,6 +84,8 @@ impl ServiceKind {
             Self::Apache => layout.etc("apache").join("httpd.conf"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
             Self::PhpFpm => layout.etc("php").join("php-fpm.conf"),
+            // Mailpit is configured on the command line; its data lives here.
+            Self::Mailpit => layout.data("mailpit"),
         }
     }
 
@@ -86,6 +95,7 @@ impl ServiceKind {
             Self::Apache => "apache-error.log",
             Self::Mariadb => "mariadb-error.log",
             Self::PhpFpm => "php-fpm.log",
+            Self::Mailpit => "mailpit-output.log",
         };
         layout.logs().join(file)
     }
@@ -95,6 +105,7 @@ impl ServiceKind {
             Self::Apache => settings.ports.http,
             Self::Mariadb => settings.ports.mysql,
             Self::PhpFpm => settings.ports.php_fpm,
+            Self::Mailpit => settings.ports.mail_smtp,
         }
     }
 }
@@ -189,6 +200,23 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             path_prepend: vec![],
             stop_cmd: None,
         },
+        ServiceKind::Mailpit => LaunchSpec {
+            program: home.join(exe("mailpit")),
+            args: vec![
+                "--smtp".into(),
+                format!("127.0.0.1:{}", settings.ports.mail_smtp),
+                "--listen".into(),
+                format!("127.0.0.1:{}", settings.ports.mail_ui),
+                "--database".into(),
+                path(layout.data("mailpit").join("mailpit.db")),
+                // Frameworks often send credentials even locally; accept anything.
+                "--smtp-auth-accept-any".into(),
+                "--smtp-auth-allow-insecure".into(),
+            ],
+            cwd: home,
+            path_prepend: vec![],
+            stop_cmd: None,
+        },
     };
     Ok(spec)
 }
@@ -201,7 +229,8 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             if cfg!(windows) && settings.versions.php.is_some() {
                 configs::write_php(settings, layout)?;
             }
-            let sites = sites::scan(settings, layout);
+            configs::write_tools(settings, layout)?;
+            let sites = sites::served(settings, layout);
             if sites.iter().any(|s| s.ssl) && !port_free(settings.ports.https) {
                 return Err(Error::msg(format!("HTTPS port {} is already in use", settings.ports.https)));
             }
@@ -218,6 +247,13 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             configs::init_mariadb_data(settings, layout).await
         }
         ServiceKind::PhpFpm => configs::write_php(settings, layout),
+        ServiceKind::Mailpit => {
+            if !port_free(settings.ports.mail_ui) {
+                return Err(Error::msg(format!("Mailpit inbox port {} is already in use", settings.ports.mail_ui)));
+            }
+            std::fs::create_dir_all(layout.data("mailpit"))?;
+            Ok(())
+        }
     }
 }
 

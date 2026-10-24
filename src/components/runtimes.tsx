@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code2, Database, Feather } from "lucide-react";
+import { Code2, Database, Feather, Mail, Table2, TableProperties } from "lucide-react";
 import type { Runtime } from "../lib/api";
 
 /** Icon and colour used for each runtime across the app. */
@@ -18,5 +18,20 @@ export const runtimeTiles: Record<Runtime, { className: string; text: string; ic
     className: "bg-amber-600/12 text-amber-600",
     text: "text-amber-600",
     icon: (size) => <Database size={size} strokeWidth={1.75} />,
+  },
+  mailpit: {
+    className: "bg-sky-500/10 text-sky-500",
+    text: "text-sky-500",
+    icon: (size) => <Mail size={size} strokeWidth={1.75} />,
+  },
+  adminer: {
+    className: "bg-teal-500/10 text-teal-500",
+    text: "text-teal-500",
+    icon: (size) => <Table2 size={size} strokeWidth={1.75} />,
+  },
+  phpmyadmin: {
+    className: "bg-orange-500/10 text-orange-500",
+    text: "text-orange-500",
+    icon: (size) => <TableProperties size={size} strokeWidth={1.75} />,
   },
 };

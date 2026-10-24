@@ -51,6 +51,9 @@ fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<Stri
         Runtime::Apache => &mut settings.versions.apache,
         Runtime::Php => &mut settings.versions.php,
         Runtime::Mariadb => &mut settings.versions.mariadb,
+        Runtime::Mailpit => &mut settings.versions.mailpit,
+        Runtime::Adminer => &mut settings.versions.adminer,
+        Runtime::Phpmyadmin => &mut settings.versions.phpmyadmin,
     }
 }
 
@@ -61,6 +64,9 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         Runtime::Php if cfg!(windows) => &[ServiceKind::Apache],
         Runtime::Php => &[ServiceKind::PhpFpm],
         Runtime::Mariadb => &[ServiceKind::Mariadb],
+        Runtime::Mailpit => &[ServiceKind::Mailpit],
+        // Served by Apache through their own virtual hosts.
+        Runtime::Adminer | Runtime::Phpmyadmin => &[ServiceKind::Apache],
     }
 }
 
@@ -180,6 +186,8 @@ async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: Servi
 #[serde(rename_all = "camelCase")]
 struct SitesInfo {
     sites: Vec<sites::Site>,
+    /// Installed developer tools and their domains.
+    tools: Vec<sites::Site>,
     tld: String,
     /// Apache is running with a different site list than what is in www/ now.
     needs_apply: bool,
@@ -195,10 +203,11 @@ struct SitesInfo {
 #[tauri::command]
 async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
     let (settings, layout) = state.snapshot().await;
-    let sites = sites::scan(&settings, &layout);
+    let served = sites::served(&settings, &layout);
     let needs_apply =
-        state.supervisor.is_running(ServiceKind::Apache).await && sites::vhosts_stale(&settings, &layout, &sites);
-    let hosts_ok = !sites::needs_hosts_file(&settings) || sites::hosts_in_sync(&sites);
+        state.supervisor.is_running(ServiceKind::Apache).await && sites::vhosts_stale(&settings, &layout, &served);
+    let hosts_ok = !sites::needs_hosts_file(&settings) || sites::hosts_in_sync(&served);
+    let (tools, sites): (Vec<_>, Vec<_>) = served.into_iter().partition(|s| s.tool.is_some());
     let ca_trusted = if sites.iter().any(|s| s.ssl) && ssl::ca_thumbprint(&layout).is_some() {
         let mut cached = state.ca_trusted.lock().await;
         if cached.is_none() {
@@ -212,6 +221,7 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
     };
     Ok(SitesInfo {
         sites,
+        tools,
         tld: settings.tld.clone(),
         needs_apply,
         hosts_ok,
@@ -232,7 +242,7 @@ async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
         state.supervisor.wait_stopped(ServiceKind::Apache).await;
         state.supervisor.start(&app, ServiceKind::Apache, &settings, &layout).await
     } else {
-        let sites = sites::scan(&settings, &layout);
+        let sites = sites::served(&settings, &layout);
         if sites::needs_hosts_file(&settings) && !sites::hosts_in_sync(&sites) {
             sites::update_hosts(&layout, &sites).await?;
             logs::system(&app, logs::Level::Info, "Hosts file updated");
@@ -352,21 +362,43 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
     result?;
 
     // The first installed version of a runtime becomes the active one.
+    let mut activated = false;
     state
         .update_settings(|s| {
             let active = active_version(s, release.runtime);
             if active.is_none() {
                 *active = Some(release.version.clone());
+                activated = true;
             }
         })
         .await?;
+    // A new tool brings a domain and, for Mailpit, PHP mail settings: Apache picks both up on restart.
+    if activated && is_tool(release.runtime) {
+        restart_if_running(&app, &state, ServiceKind::Apache).await?;
+    }
     Ok(())
+}
+
+fn is_tool(runtime: Runtime) -> bool {
+    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin)
+}
+
+async fn restart_if_running(app: &AppHandle, state: &AppState, kind: ServiceKind) -> Result<()> {
+    if !state.supervisor.is_running(kind).await {
+        return Ok(());
+    }
+    state.supervisor.stop(app, kind).await;
+    state.supervisor.wait_stopped(kind).await;
+    let (settings, layout) = state.snapshot().await;
+    state.supervisor.start(app, kind, &settings, &layout).await
 }
 
 #[tauri::command]
 async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Runtime, version: String) -> Result<()> {
     let (mut settings, layout) = state.snapshot().await;
-    if active_version(&mut settings, runtime).as_deref() == Some(version.as_str()) {
+    let was_active = active_version(&mut settings, runtime).as_deref() == Some(version.as_str());
+    // Web tools are just files served by Apache, which restarts below instead of blocking.
+    if was_active && !matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin) {
         for &kind in dependents(runtime) {
             if state.supervisor.is_running(kind).await {
                 return Err(Error::msg(format!("Stop {} before removing the version it is using", kind.label())));
@@ -376,6 +408,9 @@ async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Run
     runtimes::remove(&layout, runtime, &version)?;
     logs::system(&app, logs::Level::Info, format!("Removed {} {version}", runtime.id()));
     state.update_settings(reconcile_versions).await?;
+    if was_active && is_tool(runtime) {
+        restart_if_running(&app, &state, ServiceKind::Apache).await?;
+    }
     Ok(())
 }
 

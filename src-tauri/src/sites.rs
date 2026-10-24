@@ -30,6 +30,10 @@ pub struct Site {
     pub url: String,
     /// Unix time in milliseconds of the folder's last modification.
     pub modified: u64,
+    /// Set for built-in tools (adminer, phpmyadmin, mailpit) rather than www/ folders.
+    pub tool: Option<&'static str>,
+    /// Forward requests to this local URL instead of serving files.
+    pub proxy: Option<String>,
 }
 
 /// Folder name → DNS label: lowercase letters, digits and dashes.
@@ -49,6 +53,56 @@ pub fn needs_hosts_file(settings: &Settings) -> bool {
     settings.tld != "localhost"
 }
 
+fn site_url(settings: &Settings, domain: &str, ssl: bool) -> String {
+    match (ssl, settings.ports.https, settings.ports.http) {
+        (true, 443, _) => format!("https://{domain}/"),
+        (true, port, _) => format!("https://{domain}:{port}/"),
+        (false, _, 80) => format!("http://{domain}/"),
+        (false, _, port) => format!("http://{domain}:{port}/"),
+    }
+}
+
+/// Installed developer tools get their own domains: adminer.test, phpmyadmin.test, mail.test.
+pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
+    let v = &settings.versions;
+    let mut tools = Vec::new();
+    let mut add = |id: &'static str, sub: &str, dir: Option<PathBuf>, proxy: Option<String>| {
+        let domain = format!("{sub}.{}", settings.tld);
+        let ssl = settings.sites.get(id).and_then(|s| s.ssl).unwrap_or(settings.https_by_default);
+        let path = dir.unwrap_or_else(|| layout.data(id));
+        tools.push(Site {
+            name: id.to_string(),
+            url: site_url(settings, &domain, ssl),
+            domain,
+            docroot: path.clone(),
+            path,
+            ssl,
+            modified: 0,
+            tool: Some(id),
+            proxy,
+        });
+    };
+    if let Some(ver) = &v.adminer {
+        add("adminer", "adminer", Some(layout.bin("adminer", ver)), None);
+    }
+    if let Some(ver) = &v.phpmyadmin {
+        add("phpmyadmin", "phpmyadmin", Some(layout.bin("phpmyadmin", ver)), None);
+    }
+    if v.mailpit.is_some() {
+        add("mailpit", "mail", None, Some(format!("http://127.0.0.1:{}/", settings.ports.mail_ui)));
+    }
+    tools
+}
+
+/// Everything Apache serves: folders in www/ plus installed tools. A folder wins if it
+/// happens to use a tool's domain.
+pub fn served(settings: &Settings, layout: &Layout) -> Vec<Site> {
+    let mut all = scan(settings, layout);
+    let taken: BTreeSet<String> = all.iter().map(|s| s.domain.clone()).collect();
+    all.extend(tools(settings, layout).into_iter().filter(|t| !taken.contains(&t.domain)));
+    all
+}
+
 pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
     let Ok(entries) = std::fs::read_dir(layout.www()) else { return Vec::new() };
     let mut sites: Vec<Site> = entries
@@ -64,19 +118,23 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             let public = path.join("public");
             let docroot = if public.is_dir() { public } else { path.clone() };
             let ssl = settings.sites.get(&name).and_then(|s| s.ssl).unwrap_or(settings.https_by_default);
-            let url = match (ssl, settings.ports.https, settings.ports.http) {
-                (true, 443, _) => format!("https://{domain}/"),
-                (true, port, _) => format!("https://{domain}:{port}/"),
-                (false, _, 80) => format!("http://{domain}/"),
-                (false, _, port) => format!("http://{domain}:{port}/"),
-            };
             let modified = e
                 .metadata()
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_millis() as u64);
-            Some(Site { name, domain, path, docroot, ssl, url, modified })
+            Some(Site {
+                url: site_url(settings, &domain, ssl),
+                name,
+                domain,
+                path,
+                docroot,
+                ssl,
+                modified,
+                tool: None,
+                proxy: None,
+            })
         })
         .collect();
     sites.sort_by(|a, b| b.modified.cmp(&a.modified));
@@ -98,9 +156,19 @@ pub fn vhosts_path(layout: &Layout) -> PathBuf {
 /// what is on disk to tell whether Apache needs a restart.
 pub fn render_vhosts(settings: &Settings, layout: &Layout, sites: &[Site]) -> String {
     let (http, https) = (settings.ports.http, settings.ports.https);
+    // Tools are also reachable as http://localhost/<tool>/.
+    let aliases: String = sites
+        .iter()
+        .filter(|s| s.tool.is_some() && s.proxy.is_none())
+        .map(|s| {
+            let dir = slash(&s.docroot);
+            // <Directory> grants are per virtual host, so the alias needs its own.
+            format!("    Alias /{} \"{dir}\"\n    <Directory \"{dir}\">\n        Require all granted\n    </Directory>\n", s.name)
+        })
+        .collect();
     let mut out = format!(
         "# Generated by lampRabit from the folders in www/. Regenerated on every Apache start.\n\n\
-         <VirtualHost *:{http}>\n    ServerName localhost\n    DocumentRoot \"{}\"\n</VirtualHost>\n",
+         <VirtualHost *:{http}>\n    ServerName localhost\n    DocumentRoot \"{}\"\n{aliases}</VirtualHost>\n",
         slash(&layout.www())
     );
 
@@ -113,11 +181,26 @@ pub fn render_vhosts(settings: &Settings, layout: &Layout, sites: &[Site]) -> St
     }
 
     for site in sites {
-        let body = format!(
-            "    ServerName {domain}\n    ServerAlias *.{domain}\n    DocumentRoot \"{root}\"\n    <Directory \"{root}\">\n        Options Indexes FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n",
-            domain = site.domain,
-            root = slash(&site.docroot),
-        );
+        let body = match &site.proxy {
+            // `upgrade` lets the proxied app use WebSockets (Mailpit's live inbox).
+            Some(target) => format!(
+                "    ServerName {domain}\n    ProxyPreserveHost On\n    ProxyPass / {target} upgrade=websocket\n    ProxyPassReverse / {target}\n",
+                domain = site.domain,
+            ),
+            None => {
+                // phpMyAdmin lags behind new PHP releases; keep deprecation notices off its pages.
+                let quiet = if site.tool == Some("phpmyadmin") && cfg!(windows) {
+                    "        php_admin_flag display_errors off\n"
+                } else {
+                    ""
+                };
+                format!(
+                    "    ServerName {domain}\n    ServerAlias *.{domain}\n    DocumentRoot \"{root}\"\n    <Directory \"{root}\">\n        Options Indexes FollowSymLinks\n        AllowOverride All\n        Require all granted\n{quiet}    </Directory>\n",
+                    domain = site.domain,
+                    root = slash(&site.docroot),
+                )
+            }
+        };
         out.push_str(&format!("\n# {}\n<VirtualHost *:{http}>\n{body}</VirtualHost>\n", site.name));
         if site.ssl {
             let (crt, key) = ssl::site_cert_paths(layout, &site.domain);

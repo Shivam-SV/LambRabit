@@ -18,9 +18,11 @@ import {
   Sun,
   SunMedium,
   TerminalSquare,
+  Mail,
+  Table2,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, type ServiceInfo, type ServiceKind, type Site } from "../lib/api";
+import { api, runtimeLabels, type ServiceInfo, type ServiceKind, type Site, type SitesInfo } from "../lib/api";
 import { useAppStore, type Activity } from "../lib/store";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { Button, Card, Pill } from "../components/ui";
@@ -38,6 +40,7 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
   apache: { icon: Feather, tile: "bg-rose-500/10 text-rose-500", blurb: "Web server for your local sites" },
   mariadb: { icon: Database, tile: "bg-amber-600/12 text-amber-600", blurb: "Database server for your local sites" },
   "php-fpm": { icon: Code2, tile: "bg-indigo-500/10 text-indigo-500", blurb: "Runs PHP for your local sites" },
+  mailpit: { icon: Mail, tile: "bg-sky-500/10 text-sky-500", blurb: "Catches mail sent by your apps" },
 };
 
 export default function Overview() {
@@ -106,7 +109,10 @@ export default function Overview() {
       </section>
 
       <section className="grid gap-5 md:grid-cols-2">
-        {services.data?.map((s) => <ServiceCard key={s.kind} service={s} now={now} />)}
+        {services.data
+          // Optional services only appear once installed.
+          ?.filter((s) => s.kind !== "mailpit" || s.installed)
+          .map((s) => <ServiceCard key={s.kind} service={s} now={now} sites={sites.data} />)}
       </section>
 
       <section className="grid gap-5 md:grid-cols-2">
@@ -117,7 +123,7 @@ export default function Overview() {
   );
 }
 
-function ServiceCard({ service, now }: { service: ServiceInfo; now: number }) {
+function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: number; sites?: SitesInfo }) {
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const onError = (e: unknown) => notify("error", String(e));
@@ -147,7 +153,25 @@ function ServiceCard({ service, now }: { service: ServiceInfo; now: number }) {
         }
       : service.kind === "mariadb"
         ? { label: "Open with client", icon: TerminalSquare, run: () => api.openDbClient().catch(onError) }
-        : null;
+        : service.kind === "mailpit"
+          ? {
+              label: "Open inbox",
+              icon: ExternalLink,
+              run: () => openUrl(sites?.tools.find((t) => t.tool === "mailpit")?.proxy ?? "http://localhost:8025/").catch(onError),
+            }
+          : null;
+
+  // Database tools served by Apache, opened from the MariaDB card.
+  const dbTools =
+    service.kind === "mariadb"
+      ? (sites?.tools ?? [])
+          .filter((t) => t.tool === "adminer" || t.tool === "phpmyadmin")
+          .map((t) => ({
+            label: `Open ${runtimeLabels[t.tool!]}`,
+            icon: <Table2 size={15} />,
+            onSelect: () => openUrl(sites?.hostsOk ? t.url : `http://localhost/${t.tool}/`).catch(onError),
+          }))
+      : [];
 
   const stats = [
     { label: "Port", value: service.port },
@@ -171,10 +195,11 @@ function ServiceCard({ service, now }: { service: ServiceInfo; now: number }) {
         </div>
         <Menu
           items={[
+            ...dbTools,
             {
-              label: "Open config file",
+              label: service.kind === "mailpit" ? "Open data folder" : "Open config file",
               icon: <FileCog size={15} />,
-              onSelect: () => openPath(service.configPath).catch(() => notify("error", "Config is created on first start")),
+              onSelect: () => openPath(service.configPath).catch(() => notify("error", "Created on first start")),
             },
             {
               label: "Open error log",

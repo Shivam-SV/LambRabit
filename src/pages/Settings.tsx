@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CheckCircle2, FolderOpen, Layers, Monitor, Moon, Plug, Save, Settings2, Sun } from "lucide-react";
+import { CheckCircle2, FolderOpen, Layers, Mail, Monitor, Moon, Plug, Save, Settings2, Sun } from "lucide-react";
 import { api, runtimeLabels, type EnvPaths, type Runtime, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
@@ -18,7 +18,7 @@ const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; 
   { key: "phpFpm", label: "PHP-FPM", hint: "PHP FastCGI Process Manager port.", only: ["macos", "linux"] },
 ];
 
-const runtimeHints = (os: Os | undefined): Record<Runtime, string> => ({
+const runtimeHints = (os: Os | undefined): Partial<Record<Runtime, string>> => ({
   apache: os === "windows" ? "HTTP server (Apache Lounge builds)" : "HTTP server",
   php: os === "windows" ? "Thread-safe builds from windows.php.net" : "Runs as PHP-FPM",
   mariadb: "MySQL-compatible database server",
@@ -227,6 +227,72 @@ export default function Settings() {
           <p className="mt-3 text-sm text-muted">
             Automatically match your system theme, or choose a light or dark theme. Applies instantly.
           </p>
+        </SectionCard>
+
+        <SectionCard
+          icon={<Mail size={22} />}
+          title="Email testing"
+          subtitle="Mail your apps send lands in Mailpit instead of real inboxes."
+          className="lg:col-span-2"
+        >
+          {!draft.versions.mailpit && (
+            <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">
+              Mailpit isn't installed yet.
+              <Button size="sm" variant="soft" onClick={() => navigate("services")}>
+                Install from Services
+              </Button>
+            </div>
+          )}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-5">
+              <Toggle
+                label="Send PHP mail() to Mailpit"
+                hint={
+                  os === "windows"
+                    ? "Sets SMTP and smtp_port in php.ini. Takes effect when Apache restarts."
+                    : "Sets sendmail_path to Mailpit's sendmail mode. Takes effect when PHP restarts."
+                }
+                checked={draft.routeMail}
+                onChange={(v) => setDraft({ ...draft, routeMail: v })}
+              />
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="SMTP port" hint="Where apps send mail.">
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    className={inputClass}
+                    value={draft.ports.mailSmtp}
+                    onChange={(e) => setDraft({ ...draft, ports: { ...draft.ports, mailSmtp: Number(e.target.value) } })}
+                  />
+                </Field>
+                <Field label="Inbox port" hint="Mailpit's web interface.">
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    className={inputClass}
+                    value={draft.ports.mailUi}
+                    onChange={(e) => setDraft({ ...draft, ports: { ...draft.ports, mailUi: Number(e.target.value) } })}
+                  />
+                </Field>
+              </div>
+            </div>
+            <div className="space-y-3 rounded-xl bg-surface-2 p-4 text-sm">
+              <div className="font-semibold">Two ways apps send mail</div>
+              <p className="text-muted">
+                <span className="font-medium text-fg">Frameworks (Laravel, Symfony, WordPress SMTP plugins)</span> talk SMTP
+                directly. Point them at Mailpit:
+              </p>
+              <pre className="selectable overflow-x-auto rounded-lg bg-bg px-3 py-2 font-mono text-xs">
+                {`MAIL_HOST=127.0.0.1\nMAIL_PORT=${draft.ports.mailSmtp}\nMAIL_USERNAME=null\nMAIL_PASSWORD=null`}
+              </pre>
+              <p className="text-muted">
+                <span className="font-medium text-fg">Plain PHP mail()</span> uses php.ini instead. The switch on the left
+                handles that for you.
+              </p>
+            </div>
+          </div>
         </SectionCard>
       </div>
     </>

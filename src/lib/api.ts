@@ -1,16 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "mariadb" | "php-fpm";
+export type ServiceKind = "apache" | "mariadb" | "php-fpm" | "mailpit";
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
-export type Runtime = "apache" | "php" | "mariadb";
+export type Runtime = "apache" | "php" | "mariadb" | "mailpit" | "adminer" | "phpmyadmin";
+export const coreRuntimes: Runtime[] = ["apache", "php", "mariadb"];
+export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin"];
 
 export const serviceLabels: Record<ServiceKind, string> = {
   apache: "Apache",
   mariadb: "MariaDB",
   "php-fpm": "PHP-FPM",
+  mailpit: "Mailpit",
 };
 
-export const runtimeLabels: Record<Runtime, string> = { apache: "Apache", php: "PHP", mariadb: "MariaDB" };
+export const runtimeLabels: Record<Runtime, string> = {
+  apache: "Apache",
+  php: "PHP",
+  mariadb: "MariaDB",
+  mailpit: "Mailpit",
+  adminer: "Adminer",
+  phpmyadmin: "phpMyAdmin",
+};
 
 export interface Release {
   runtime: Runtime;
@@ -57,10 +67,14 @@ export interface Site {
   ssl: boolean;
   url: string;
   modified: number;
+  /** Set for built-in tools rather than www/ folders. */
+  tool: "adminer" | "phpmyadmin" | "mailpit" | null;
+  proxy: string | null;
 }
 
 export interface SitesInfo {
   sites: Site[];
+  tools: Site[];
   tld: string;
   needsApply: boolean;
   hostsOk: boolean;
@@ -81,7 +95,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "php" | "mariadb" | "system";
+export type LogService = "apache" | "php" | "mariadb" | "mailpit" | "system";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -94,10 +108,11 @@ export interface RawLogLine {
 export interface Settings {
   rootDir: string;
   tld: string;
-  ports: { http: number; https: number; mysql: number; phpFpm: number };
-  versions: { apache: string | null; php: string | null; mariadb: string | null };
+  ports: { http: number; https: number; mysql: number; phpFpm: number; mailSmtp: number; mailUi: number };
+  versions: Record<Runtime, string | null>;
   httpsByDefault: boolean;
   manageHosts: boolean;
+  routeMail: boolean;
   sites: Record<string, { ssl: boolean | null }>;
 }
 
