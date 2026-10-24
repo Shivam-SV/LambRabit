@@ -1084,7 +1084,17 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let settings_path = app.path().app_config_dir()?.join("settings.toml");
+            let config_dir = app.path().app_config_dir()?;
+            let settings_path = config_dir.join("settings.toml");
+            // Pre-release builds used the identifier "dev.lamprabit.app"; carry their settings over.
+            if !settings_path.exists() {
+                if let Some(old) = config_dir.parent().map(|p| p.join("dev.lamprabit.app").join("settings.toml")) {
+                    if old.exists() {
+                        let _ = std::fs::create_dir_all(&config_dir);
+                        let _ = std::fs::copy(&old, &settings_path);
+                    }
+                }
+            }
             let mut settings = Settings::load(&settings_path)?;
             if let Err(e) = Layout::new(&settings.root_dir).ensure() {
                 eprintln!("could not create {}: {e}", settings.root_dir.display());
