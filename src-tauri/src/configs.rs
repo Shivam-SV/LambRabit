@@ -260,19 +260,10 @@ upload_tmp_dir = "{tmp}"
         tmp = slash(&layout.tmp()),
     ));
 
-    let extensions = [
-        "bz2", "curl", "exif", "fileinfo", "gd", "gettext", "intl", "mbstring", "mysqli", "openssl",
-        "pdo_mysql", "pdo_sqlite", "sodium", "sqlite3", "xsl", "zip",
-    ];
-    for ext in extensions {
-        if cfg!(windows) && !ext_dir.join(format!("php_{ext}.dll")).exists() {
-            continue; // compiled in, or not shipped with this build
-        }
-        ini.push_str(&format!("extension={ext}\n"));
-    }
-    if !cfg!(windows) || ext_dir.join("php_opcache.dll").exists() {
-        ini.push_str("zend_extension=opcache\nopcache.enable=1\nopcache.validate_timestamps=1\nopcache.revalidate_freq=0\n");
-    }
+    ini.push_str("
+; Extensions (Services → PHP → Extensions)
+");
+    ini.push_str(&crate::extensions::ini_lines(settings, layout, version));
     ini.push_str(&mail_directives(settings, layout));
     let ini_path = etc.join("php.ini");
     std::fs::write(&ini_path, ini)?;

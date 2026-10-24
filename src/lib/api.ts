@@ -48,6 +48,16 @@ export interface UpdateNotice {
   release: Release;
 }
 
+export interface ExtInfo {
+  name: string;
+  kind: "bundled" | "extra";
+  description: string | null;
+  enabled: boolean;
+  installed: boolean;
+  available: string | null;
+  note: string | null;
+}
+
 export type TunnelProvider = "ngrok" | "cloudflare";
 
 export interface Tunnel {
@@ -281,6 +291,10 @@ export const api = {
   nodeUninstall: (version: string) => invoke<void>("node_uninstall", { version }),
   nvmInstall: () => invoke<void>("nvm_install"),
   runtimeUpdates: () => invoke<UpdateNotice[]>("runtime_updates"),
+  phpExtensions: (version: string) => invoke<ExtInfo[]>("php_extensions", { version }),
+  setPhpExtension: (version: string, name: string, enabled: boolean) =>
+    invoke<void>("set_php_extension", { version, name, enabled }),
+  installPhpExtension: (version: string, name: string) => invoke<void>("install_php_extension", { version, name }),
   openTerminal: (dir: string | null) => invoke<void>("open_terminal", { dir }),
   openInEditor: (dir: string) => invoke<void>("open_in_editor", { dir }),
   vcRuntimeStatus: () => invoke<{ applicable: boolean; installed: boolean; version: string | null }>("vc_runtime_status"),

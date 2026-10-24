@@ -73,8 +73,8 @@ Pick the PHP version for a site from its card on the Sites page. lampRabit runs 
 ### Sensible defaults (Available)
 Each PHP version gets its own `php.ini` with developer-friendly settings: errors shown, 512 MB memory limit, 128 MB uploads, OPcache on (with instant reloads), and common extensions enabled (curl, gd, intl, mbstring, mysqli, openssl, pdo_mysql, pdo_sqlite, sodium, zip and more). Per-project overrides work through a `.user.ini` file in the project.
 
-### PHP extension manager (Coming soon)
-Browse every extension for each installed PHP version, switch them on or off, and add popular extras like Xdebug, Redis, APCu, Imagick, MongoDB and PCOV with one click. Each extension shows whether it's built in, enabled, downloadable for that PHP version, or unavailable on your platform, and why. Xdebug comes preconfigured for step debugging.
+### PHP extension manager (Available, Windows)
+Browse every extension for each installed PHP version, switch them on or off, and add popular extras with one click: Xdebug, Redis (phpredis), APCu, igbinary, MongoDB, PCOV, Imagick and YAML. Each extra shows the version available for that exact PHP release, or "no build for PHP 8.x yet". Xdebug comes preconfigured for step debugging (trigger mode, port 9003), and PHP restarts automatically when you change something. On macOS and Linux this arrives with lampRabit's PHP downloads for those platforms.
 
 ### Worker pools (Available)
 On Windows each PHP version runs as several worker processes (4 by default, adjustable) so pages load in parallel. Crashed workers restart automatically; a worker that keeps crashing is stopped and reported instead of looping.
@@ -125,7 +125,7 @@ Install either or both from Services. They're served at `phpmyadmin.test` and `a
 Open the MariaDB client in a terminal, already connected, from the MariaDB card's menu.
 
 ### Redis (Available)
-A Redis-compatible server on every platform: Microsoft's Garnet, installed from Services together with a private .NET runtime (nothing is installed system-wide). It runs on port 6379 with health checks and logs like every other service. Data is kept in memory, which suits caches, sessions and queues in development. PHP apps can use it through Predis today; the phpredis extension arrives with the PHP extension manager.
+A Redis-compatible server on every platform: Microsoft's Garnet, installed from Services together with a private .NET runtime (nothing is installed system-wide). It runs on port 6379 with health checks and logs like every other service. Data is kept in memory, which suits caches, sessions and queues in development. PHP apps can use it through Predis or the phpredis extension (one click in the PHP extension manager).
 
 ### Memcached (Available on macOS and Linux)
 lampRabit runs the `memcached` installed on your system (`brew install memcached` or `apt install memcached`). There are no maintained Memcached builds for Windows, so on Windows lampRabit explains this and suggests Redis instead.

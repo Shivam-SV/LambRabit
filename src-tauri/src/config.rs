@@ -36,6 +36,15 @@ pub struct Settings {
     pub editor: String,
     /// Per-site overrides keyed by folder name.
     pub sites: BTreeMap<String, SiteSettings>,
+    /// Extension choices per installed PHP version, on top of the defaults.
+    pub php_extensions: BTreeMap<String, ExtensionChoices>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtensionChoices {
+    pub enabled: std::collections::BTreeSet<String>,
+    pub disabled: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -140,6 +149,7 @@ impl Default for Settings {
             start_services_on_launch: false,
             editor: "code".into(),
             sites: BTreeMap::new(),
+            php_extensions: BTreeMap::new(),
         }
     }
 }

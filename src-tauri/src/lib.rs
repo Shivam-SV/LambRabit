@@ -3,6 +3,7 @@ mod config;
 mod configs;
 mod diagnose;
 mod error;
+mod extensions;
 mod layout;
 mod logs;
 mod node;
@@ -607,6 +608,43 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 }
 
 #[tauri::command]
+async fn php_extensions(state: State<'_, AppState>, version: String) -> Result<Vec<extensions::ExtInfo>> {
+    let (settings, layout) = state.snapshot().await;
+    extensions::list(&state.http, &settings, &layout, &version).await
+}
+
+/// Switches an extension on or off for one PHP version and restarts PHP to apply it.
+#[tauri::command]
+async fn set_php_extension(app: AppHandle, state: State<'_, AppState>, version: String, name: String, enabled: bool) -> Result<()> {
+    state
+        .update_settings(|s| {
+            let choices = s.php_extensions.entry(version.clone()).or_default();
+            if enabled {
+                choices.disabled.remove(&name);
+                if !extensions::DEFAULTS.contains(&name.as_str()) {
+                    choices.enabled.insert(name.clone());
+                }
+            } else {
+                choices.enabled.remove(&name);
+                choices.disabled.insert(name.clone());
+            }
+        })
+        .await?;
+    logs::system(&app, logs::Level::Info, format!("PHP {version}: {name} {}", if enabled { "enabled" } else { "disabled" }));
+    restart_web_servers(&app, &state).await
+}
+
+/// Downloads an extra extension for one PHP version and enables it.
+#[tauri::command]
+async fn install_php_extension(app: AppHandle, state: State<'_, AppState>, version: String, name: String) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    logs::system(&app, logs::Level::Info, format!("Installing {name} for PHP {version}"));
+    let ext_version = extensions::install(&state.http, &layout, &version, &name).await?;
+    logs::system(&app, logs::Level::Info, format!("Installed {name} {ext_version} for PHP {version}"));
+    set_php_extension(app, state, version, name, true).await
+}
+
+#[tauri::command]
 async fn php_status(state: State<'_, AppState>) -> Result<Vec<php::PoolStatus>> {
     Ok(state.supervisor.php.status().await)
 }
@@ -1130,6 +1168,9 @@ pub fn run() {
             set_site_server,
             php_status,
             create_project,
+            php_extensions,
+            set_php_extension,
+            install_php_extension,
             open_terminal,
             open_in_editor,
             vc_runtime_status,

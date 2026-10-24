@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownToLine, Check, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, Check, ExternalLink, Puzzle, RefreshCw, Trash2 } from "lucide-react";
+import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
 import {
@@ -245,6 +246,8 @@ function RuntimeRail({
   });
 
   const have = installed?.versions ?? [];
+  const [extOpen, setExtOpen] = useState(false);
+  const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const updates = useRuntimeUpdates().data?.filter((u) => u.runtime === runtime) ?? [];
   const nodes: Node[] = [...new Set([...have, ...(catalog.data ?? []).map((r) => r.version)])]
     .sort(newestFirst)
@@ -266,6 +269,11 @@ function RuntimeRail({
             {catalog.data && ` · ${catalog.data.filter((r) => !have.includes(r.version)).length} available`}
           </p>
         </div>
+        {runtime === "php" && installed?.active && os === "windows" && (
+          <Button size="sm" variant="soft" onClick={() => setExtOpen(true)}>
+            <Puzzle size={14} /> Extensions
+          </Button>
+        )}
         {url && installed?.active && (
           <Button size="sm" variant="soft" onClick={() => openUrl(url).catch(onError)}>
             <ExternalLink size={14} /> Open
@@ -277,6 +285,7 @@ function RuntimeRail({
       </div>
 
       {catalog.isError && <p className="mb-3 text-sm text-danger-text">{String(catalog.error)}</p>}
+      {runtime === "php" && <ExtensionsDialog open={extOpen} onClose={() => setExtOpen(false)} />}
 
       <div className="-mx-6 overflow-x-auto px-6 pb-1">
         <ol className="relative inline-flex gap-3 pt-6">

@@ -73,7 +73,7 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
 - Microsoft Visual C++ runtime check on Windows, with a link to (or download of) the redistributable.
 - MariaDB data directory per major version, or an automatic `mariadb-upgrade` when moving up.
 
-### 7.2 PHP extension manager
+### 7.2 PHP extension manager ✅
 Browse, enable, disable and add PHP extensions per installed PHP version, with compatibility shown for each.
 
 - **Bundled extensions**: list what each PHP build ships (Windows: `ext/php_*.dll`; elsewhere: `php -m` plus shared objects in the extension dir). Toggle them on or off per version; the choice is stored in settings and written into that version's generated php.ini, then the PHP pool restarts.
