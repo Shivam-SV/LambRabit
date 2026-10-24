@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in lampRabit doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Services
+        2. Click …
+  - type: input
+    id: version
+    attributes:
+      label: lampRabit version
+      description: Shown in Settings → Updates.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, macOS (Apple Silicon), macOS (Intel), Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: Settings → Troubleshooting → Run diagnostics → Copy. Your user name and home folder are hidden.
+      render: markdown
