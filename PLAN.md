@@ -28,7 +28,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **4. Sites**: `www/foo` → `foo.test` (+ sub-domains, `public/` detection), hosts file kept in sync when Apache starts (one elevation prompt, managed block only), local CA + per-site HTTPS with a global default, System log stream persisted to `logs/lampRabit.log`, log history read from disk with clear, OS-specific settings hidden elsewhere
 - [x] **5. Developer utilities**: Adminer / phpMyAdmin at `adminer.test`; Mailpit as a managed service (SMTP 1025, UI 8025) with PHP `mail()` routed to it (Windows: `SMTP`/`smtp_port`; macOS/Linux: `sendmail_path = mailpit sendmail`) and a panel explaining SMTP vs `mail()` settings for frameworks
 - [ ] **6. Feature set** (see below)
-- [ ] **7. Comfort**: tray menu, autostart, "open terminal" with PATH, open in editor, VC++ runtime check, MariaDB data dir per major version
+- [ ] **7. Comfort and PHP tooling** (see below)
 - [ ] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI
 
 ## Phase 6: feature set
@@ -64,3 +64,41 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
 ### 6.5 Updates
 - **App updates**: Tauri updater with signed releases on GitHub; check on start (opt-out) and from Settings. Depends on the release pipeline in phase 8.
 - **Runtime updates**: badge when a newer patch of an installed Apache/PHP/MariaDB is available.
+
+## Phase 7: comfort and PHP tooling
+
+### 7.1 Comfort
+- Tray menu (start/stop all, open sites, quit), start with the OS, optionally start services on launch.
+- "Open terminal" with PHP, Composer, MariaDB and Node on PATH; "Open in editor" for projects.
+- Microsoft Visual C++ runtime check on Windows, with a link to (or download of) the redistributable.
+- MariaDB data directory per major version, or an automatic `mariadb-upgrade` when moving up.
+
+### 7.2 PHP extension manager
+Browse, enable, disable and add PHP extensions per installed PHP version, with compatibility shown for each.
+
+- **Bundled extensions**: list what each PHP build ships (Windows: `ext/php_*.dll`; elsewhere: `php -m` plus shared objects in the extension dir). Toggle them on or off per version; the choice is stored in settings and written into that version's generated php.ini, then the PHP pool restarts.
+- **Extra extensions** (PECL and vendor builds): Xdebug, Redis, APCu, Imagick, MongoDB, PCOV, Memcached and similar.
+  - Windows: download prebuilt DLLs matching the PHP minor version, thread safety (lampRabit's PHP builds are thread-safe) and compiler (vs16 / vs17) from downloads.php.net/~windows/pecl and xdebug.org. Show "available for PHP 8.3, not yet for 8.5" style compatibility from what actually exists for download.
+  - macOS / Linux: depends on how PHP itself is provided there (static builds can't load shared extensions); show "built in" / "not available on this platform" accordingly.
+- Extensions with extra requirements are flagged (Imagick needs ImageMagick DLLs; Xdebug gets a ready-made `xdebug.mode=debug` and IDE port setting).
+- Status per extension: built in, enabled, disabled, downloadable, unavailable (with the reason).
+
+### 7.3 FrankenPHP (assessment and plan)
+FrankenPHP is a PHP application server built on Caddy: the web server and PHP run in one process, with automatic HTTPS, HTTP/2 and HTTP/3, and a "worker mode" that keeps the application booted between requests (Laravel Octane, Symfony Runtime).
+
+**Availability (checked against v1.13.3 releases):** Linux x86_64 and aarch64, macOS Apple Silicon (no Intel Mac build), and a Windows x86_64 zip. All three platforms can be offered; Intel Macs get "not available" with the reason.
+
+**How it fits lampRabit**
+- It is a third web server, not a PHP version: each FrankenPHP release embeds its own PHP, so it doesn't use the PHP pools, php.ini per version, or the extension manager. Its PHP version is shown read-only on the site card, and its bundled extensions are listed (static builds include the common ones).
+- Per-site choice: Settings → Web server gains "FrankenPHP" as an option next to Apache and Nginx; sites can pick it like they pick Nginx today. It gets its own ports when another server holds 80/443.
+- Config: lampRabit generates a Caddyfile with one `php_server` block per site, using lampRabit's own certificates (`tls <cert> <key>`) so the existing trusted CA keeps working, and Caddy's automatic HTTPS turned off to avoid a second CA.
+- Worker mode as a per-site toggle (off by default) for projects that support it; a restart button on the site card reloads workers after code changes.
+- Mail: `sendmail_path`/SMTP settings through FrankenPHP's php.ini (`PHP_INI_SCAN_DIR`) so Mailpit keeps catching mail.
+- Logs, health checks (HTTP probe), port-conflict detection and the diagnostics report extend to it like the other servers.
+
+**Risks / open questions**
+- Windows build is the newest platform; needs a spike (start, PHP extensions loaded, our certificates, `.user.ini`) before committing.
+- Extensions are fixed at build time; projects needing an extension that isn't in the build must use Apache/Nginx.
+- Worker mode changes app behaviour (state persists between requests); keep it opt-in with a clear explanation.
+
+**Recommendation:** add FrankenPHP as an optional third server after the extension manager, starting with a spike on Windows and Linux. Effort is moderate because sites, certificates, ports, logs and health checks are already server-agnostic.
