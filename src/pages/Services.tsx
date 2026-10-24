@@ -8,13 +8,13 @@ import {
   coreRuntimes,
   runtimeLabels,
   toolRuntimes,
-  type SitesInfo,
   type InstalledRuntime,
   type Release,
   type Runtime,
   type ServiceInfo,
 } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
+import { toolUrl } from "../lib/tools";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, Card, IconTile, PageHeader } from "../components/ui";
 
@@ -29,13 +29,6 @@ const roles: Record<Runtime, { blurb: string; source: string }> = {
 
 const order = coreRuntimes;
 
-/** Where each tool opens: its own domain when the hosts file knows it, otherwise localhost. */
-function toolUrl(runtime: Runtime, info: SitesInfo | undefined, mailUi: number | undefined): string | undefined {
-  if (runtime === "mailpit") return mailUi ? `http://localhost:${mailUi}/` : undefined;
-  const tool = info?.tools.find((t) => t.tool === runtime);
-  if (!tool) return undefined;
-  return info?.hostsOk ? tool.url : `http://localhost/${runtime}/`;
-}
 
 const versionKey = (v: string) => v.split(".").map(Number);
 const newestFirst = (a: string, b: string) => {

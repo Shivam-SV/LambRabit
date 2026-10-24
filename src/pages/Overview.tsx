@@ -23,8 +23,19 @@ import {
   Table2,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, runtimeLabels, type ServiceInfo, type ServiceKind, type Site, type SitesInfo } from "../lib/api";
+import {
+  api,
+  runtimeLabels,
+  toolRuntimes,
+  type Runtime,
+  type ServiceInfo,
+  type ServiceKind,
+  type Site,
+  type SitesInfo,
+} from "../lib/api";
 import { useAppStore, type Activity } from "../lib/store";
+import { toolUrl } from "../lib/tools";
+import { runtimeTiles } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { Button, Card, Pill } from "../components/ui";
 import Menu from "../components/Menu";
@@ -49,6 +60,8 @@ export default function Overview() {
   const now = useNow();
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 15_000 });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const mailUi = settings.data?.ports.mailUi;
 
   const hour = new Date(now).getHours();
   const greeting = greetings.find((g) => hour < g.until)!;
@@ -121,11 +134,13 @@ export default function Overview() {
         </div>
       </section>
 
+      <QuickLinks sites={sites.data} services={services.data ?? []} mailUi={mailUi} />
+
       <section className="grid gap-5 md:grid-cols-2">
         {services.data
           // Optional services only appear once installed.
           ?.filter((s) => s.kind !== "mailpit" || s.installed)
-          .map((s) => <ServiceCard key={s.kind} service={s} now={now} sites={sites.data} />)}
+          .map((s) => <ServiceCard key={s.kind} service={s} now={now} sites={sites.data} mailUi={mailUi} />)}
       </section>
 
       <section className="grid gap-5 md:grid-cols-2">
@@ -136,7 +151,17 @@ export default function Overview() {
   );
 }
 
-function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: number; sites?: SitesInfo }) {
+function ServiceCard({
+  service,
+  now,
+  sites,
+  mailUi,
+}: {
+  service: ServiceInfo;
+  now: number;
+  sites?: SitesInfo;
+  mailUi?: number;
+}) {
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const onError = (e: unknown) => notify("error", String(e));
@@ -162,7 +187,9 @@ function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: numbe
     <Pill tone="warn">{service.state === "starting" ? "Starting" : "Stopping"}</Pill>
   );
 
-  const action =
+  // The MariaDB card opens a web database tool: phpMyAdmin, else Adminer, else offer to install one.
+  const dbTool = (["phpmyadmin", "adminer"] as const).find((t) => toolUrl(t, sites, mailUi));
+  const action: { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null =
     service.kind === "apache"
       ? {
           label: "Open in browser",
@@ -170,25 +197,38 @@ function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: numbe
           run: () => openUrl(`http://localhost${service.port === 80 ? "" : `:${service.port}`}/`).catch(onError),
         }
       : service.kind === "mariadb"
-        ? { label: "Open with client", icon: TerminalSquare, run: () => api.openDbClient().catch(onError) }
+        ? dbTool
+          ? {
+              label: `Open ${runtimeLabels[dbTool]}`,
+              icon: Table2,
+              run: () => openUrl(toolUrl(dbTool, sites, mailUi)!).catch(onError),
+            }
+          : { label: "Install phpMyAdmin", icon: Table2, run: () => navigate("services"), always: true }
         : service.kind === "mailpit"
           ? {
               label: "Open inbox",
               icon: ExternalLink,
-              run: () => openUrl(sites?.tools.find((t) => t.tool === "mailpit")?.proxy ?? "http://localhost:8025/").catch(onError),
+              run: () => openUrl(toolUrl("mailpit", sites, mailUi) ?? "http://localhost:8025/").catch(onError),
             }
           : null;
 
-  // Database tools served by Apache, opened from the MariaDB card.
-  const dbTools =
+  // Other ways into the database, in the card's menu.
+  const dbMenu =
     service.kind === "mariadb"
-      ? (sites?.tools ?? [])
-          .filter((t) => t.tool === "adminer" || t.tool === "phpmyadmin")
-          .map((t) => ({
-            label: `Open ${runtimeLabels[t.tool!]}`,
-            icon: <Table2 size={15} />,
-            onSelect: () => openUrl(sites?.hostsOk ? t.url : `http://localhost/${t.tool}/`).catch(onError),
-          }))
+      ? [
+          ...(["phpmyadmin", "adminer"] as const)
+            .filter((t) => t !== dbTool && toolUrl(t, sites, mailUi))
+            .map((t) => ({
+              label: `Open ${runtimeLabels[t]}`,
+              icon: <Table2 size={15} />,
+              onSelect: () => openUrl(toolUrl(t, sites, mailUi)!).catch(onError),
+            })),
+          {
+            label: "Open command-line client",
+            icon: <TerminalSquare size={15} />,
+            onSelect: () => api.openDbClient().catch(onError),
+          },
+        ]
       : [];
 
   const stats = [
@@ -213,7 +253,7 @@ function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: numbe
         </div>
         <Menu
           items={[
-            ...dbTools,
+            ...dbMenu,
             {
               label: service.kind === "mailpit" ? "Open data folder" : "Open config file",
               icon: <FileCog size={15} />,
@@ -269,12 +309,68 @@ function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: numbe
           </Button>
         )}
         {action && (
-          <Button variant="soft" className="ml-auto" onClick={action.run} disabled={!running}>
+          <Button variant="soft" className="ml-auto" onClick={action.run} disabled={!running && !action.always}>
             <action.icon size={16} /> {action.label}
           </Button>
         )}
       </div>
     </Card>
+  );
+}
+
+const quickLinkInfo: Record<string, { label: string; blurb: string; needs: ServiceKind }> = {
+  mailpit: { label: "Mailpit inbox", blurb: "Mail sent by your apps", needs: "mailpit" },
+  phpmyadmin: { label: "phpMyAdmin", blurb: "Browse and edit databases", needs: "apache" },
+  adminer: { label: "Adminer", blurb: "Lightweight database admin", needs: "apache" },
+};
+
+/** One-click entry points to the developer tools, with a hint when they can't be reached. */
+function QuickLinks({ sites, services, mailUi }: { sites?: SitesInfo; services: ServiceInfo[]; mailUi?: number }) {
+  const navigate = useAppStore((s) => s.navigate);
+  const notify = useAppStore((s) => s.notify);
+  const order: Runtime[] = ["mailpit", "phpmyadmin", "adminer"];
+  if (!sites) return null;
+
+  return (
+    <section className="grid gap-3 sm:grid-cols-3">
+      {order
+        .filter((t) => toolRuntimes.includes(t))
+        .map((tool) => {
+          const info = quickLinkInfo[tool];
+          const installed = tool === "mailpit" ? services.some((s) => s.kind === "mailpit" && s.installed) : !!toolUrl(tool, sites, mailUi);
+          const url = installed ? toolUrl(tool, sites, mailUi) : undefined;
+          const host = services.find((s) => s.kind === info.needs);
+          const up = host?.state === "running";
+          const tiles = runtimeTiles[tool];
+          return (
+            <button
+              key={tool}
+              onClick={() => (url ? openUrl(url).catch((e) => notify("error", String(e))) : navigate("services"))}
+              className="group flex items-center gap-3 rounded-2xl border border-line bg-surface p-4 text-left shadow-card transition-colors hover:border-accent/40"
+            >
+              <div className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl", tiles.className)}>
+                {tiles.icon(20)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">{info.label}</div>
+                <div className="flex items-center gap-1.5 truncate text-xs text-muted">
+                  {!installed ? (
+                    "Not installed. Click to install"
+                  ) : up ? (
+                    info.blurb
+                  ) : (
+                    <>
+                      <span className="size-1.5 rounded-full bg-warn" />
+                      Start {host?.label ?? "the service"} to open
+                    </>
+                  )}
+                </div>
+              </div>
+              <ExternalLink size={16} className="shrink-0 text-muted transition-colors group-hover:text-accent-text" />
+            </button>
+          );
+        })}
+    </section>
   );
 }
 
