@@ -130,12 +130,6 @@ pub struct StatusEvent {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct LogEvent {
-    pub kind: ServiceKind,
-    pub line: String,
-}
-
 struct LaunchSpec {
     program: PathBuf,
     args: Vec<String>,
@@ -453,7 +447,8 @@ where
         let mut lines = BufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = log.lock().await.write_all(format!("{line}\n").as_bytes()).await;
-            let _ = app.emit("service-log", LogEvent { kind, line });
+            let service = if kind == ServiceKind::PhpFpm { "php" } else { kind.id() };
+            crate::logs::push(&app, service, "output", line);
         }
     });
 }

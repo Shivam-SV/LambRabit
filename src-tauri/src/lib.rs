@@ -2,6 +2,7 @@ mod config;
 mod configs;
 mod error;
 mod layout;
+mod logs;
 mod procgroup;
 mod runtimes;
 mod services;
@@ -227,6 +228,11 @@ async fn open_db_client(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
+fn recent_logs(app: AppHandle) -> Vec<logs::LogLine> {
+    logs::recent(&app)
+}
+
+#[tauri::command]
 fn check_port(port: u16) -> bool {
     services::port_free(port)
 }
@@ -323,6 +329,7 @@ async fn set_active_version(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.toml");
             let mut settings = Settings::load(&settings_path)?;
@@ -337,6 +344,17 @@ pub fn run() {
                 http: runtimes::client(),
                 installing: Mutex::new(HashSet::new()),
             });
+            app.manage(logs::LogHub::default());
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut tailer = logs::Tailer::default();
+                loop {
+                    let dir = Layout::new(&handle.state::<AppState>().settings.read().await.root_dir).logs();
+                    tailer.poll(&handle, &dir);
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -349,6 +367,7 @@ pub fn run() {
             start_all,
             stop_all,
             check_port,
+            recent_logs,
             restart_service,
             list_sites,
             open_db_client,

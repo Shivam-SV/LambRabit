@@ -61,8 +61,13 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export interface LogEvent {
-  kind: ServiceKind;
+export type LogService = "apache" | "php" | "mariadb";
+
+/** A raw log line from a service's output or one of its log files. */
+export interface RawLogLine {
+  id: number;
+  service: LogService;
+  stream: "output" | "error" | "access";
   line: string;
 }
 
@@ -93,6 +98,7 @@ export const api = {
   startAll: () => invoke<string[]>("start_all"),
   stopAll: () => invoke<void>("stop_all"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
+  recentLogs: () => invoke<RawLogLine[]>("recent_logs"),
   runtimeCatalog: (runtime: Runtime) => invoke<Release[]>("runtime_catalog", { runtime }),
   installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),
   installRuntime: (release: Release) => invoke<void>("install_runtime", { release }),

@@ -3,12 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Play, Square } from "lucide-react";
+import clsx from "clsx";
 import {
   api,
   runtimeLabels,
   serviceLabels,
   type InstallProgress,
-  type LogEvent,
+  type RawLogLine,
   type StatusEvent,
 } from "./lib/api";
 import { useAppStore } from "./lib/store";
@@ -16,7 +17,7 @@ import Overview from "./pages/Overview";
 import Sites from "./pages/Sites";
 import Logs from "./pages/Logs";
 import Settings from "./pages/Settings";
-import Versions from "./pages/Versions";
+import Services from "./pages/Services";
 import Notices from "./components/Notices";
 import Logo from "./components/Logo";
 import BottomNav from "./components/BottomNav";
@@ -24,7 +25,7 @@ import { Button } from "./components/ui";
 
 function useBackendEvents() {
   const queryClient = useQueryClient();
-  const { pushLog, notify, setInstall, record } = useAppStore.getState();
+  const { pushLog, mergeLogs, notify, setInstall, record } = useAppStore.getState();
 
   useEffect(() => {
     const unlisten = [
@@ -36,7 +37,7 @@ function useBackendEvents() {
         if (payload.state === "error") record(payload.message ?? `${label} failed`, label, "error");
         if (payload.message) notify("error", payload.message);
       }),
-      listen<LogEvent>("service-log", ({ payload }) => pushLog(payload.kind, payload.line)),
+      listen<RawLogLine>("log-line", ({ payload }) => pushLog(payload)),
       listen<InstallProgress>("install-progress", ({ payload }) => {
         setInstall(payload);
         if (payload.stage === "done" || payload.stage === "error") {
@@ -48,11 +49,13 @@ function useBackendEvents() {
         }
       }),
     ];
+    // Subscribe first, then backfill, so no line falls in between.
+    Promise.all(unlisten).then(() => api.recentLogs().then(mergeLogs)).catch(() => {});
     return () => unlisten.forEach((p) => p.then((off) => off()));
-  }, [queryClient, pushLog, notify, setInstall, record]);
+  }, [queryClient, pushLog, mergeLogs, notify, setInstall, record]);
 }
 
-function AppHeader() {
+function AppHeader({ showActions }: { showActions: boolean }) {
   const notify = useAppStore((s) => s.notify);
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
@@ -76,7 +79,7 @@ function AppHeader() {
           <div className="text-sm text-muted">Local dev environment</div>
         </div>
       </div>
-      <div className="flex gap-2.5">
+      <div className={clsx("flex gap-2.5", !showActions && "hidden")}>
         <Button size="lg" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data}>
           <FolderOpen size={18} /> Open www
         </Button>
@@ -105,11 +108,11 @@ export default function App() {
   return (
     <div ref={scroller} className="h-full overflow-y-auto">
       <div className="mx-auto max-w-6xl px-6 pb-32 sm:px-10">
-        <AppHeader />
+        <AppHeader showActions={page === "overview"} />
         <main>
           {page === "overview" && <Overview />}
           {page === "sites" && <Sites />}
-          {page === "services" && <Versions />}
+          {page === "services" && <Services />}
           {page === "logs" && <Logs />}
           {page === "settings" && <Settings />}
         </main>

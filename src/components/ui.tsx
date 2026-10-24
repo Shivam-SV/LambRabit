@@ -87,5 +87,104 @@ export function Pill({ tone, children }: { tone: "ok" | "warn" | "muted" | "dang
   );
 }
 
+export function Switch({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={clsx(
+        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+        checked ? "bg-accent" : "bg-muted/40",
+      )}
+    >
+      <span
+        className={clsx(
+          "absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform",
+          checked && "translate-x-5",
+        )}
+      />
+    </button>
+  );
+}
+
+/** Joined toggle buttons; one option is always selected. */
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string; icon?: ReactNode }[];
+  className?: string;
+}) {
+  return (
+    <div role="radiogroup" className={clsx("flex rounded-xl border border-line bg-surface p-1 shadow-card", className)}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={clsx(
+            "flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors",
+            value === o.value ? "bg-accent text-accent-fg shadow-card" : "text-muted hover:text-fg",
+          )}
+        >
+          {o.icon}
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function IconTile({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div className={clsx("flex size-12 shrink-0 items-center justify-center rounded-2xl", className)}>{children}</div>
+  );
+}
+
+export function SectionCard({
+  icon,
+  title,
+  subtitle,
+  actions,
+  className,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle?: string;
+  actions?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className={clsx("p-6", className)}>
+      <div className="mb-5 flex items-start gap-4">
+        <IconTile className="bg-accent-soft text-accent-text">{icon}</IconTile>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+          {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
+        </div>
+        {actions}
+      </div>
+      {children}
+    </Card>
+  );
+}
+
 export const inputClass =
   "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/25";

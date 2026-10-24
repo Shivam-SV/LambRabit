@@ -119,6 +119,23 @@ body {
   @apply bg-bg text-fg antialiased select-none;
 }
 
+/* Animated dashes for live links in the stack diagram. */
+@keyframes flow {
+  to {
+    background-position: 24px 0;
+  }
+}
+.flow-line {
+  background-image: linear-gradient(90deg, var(--accent) 55%, transparent 0);
+  background-size: 12px 100%;
+  animation: flow 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-line {
+    animation: none;
+  }
+}
+
 input,
 textarea,
 .selectable {
