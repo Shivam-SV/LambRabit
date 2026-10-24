@@ -42,7 +42,7 @@ pub struct Settings {
     pub php_extensions: BTreeMap<String, ExtensionChoices>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExtensionChoices {
     pub enabled: std::collections::BTreeSet<String>,

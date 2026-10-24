@@ -207,7 +207,7 @@ function ServiceCard({
   // The MariaDB card opens a web database tool: phpMyAdmin, else Adminer, else offer to install one.
   const dbTool = (["phpmyadmin", "adminer"] as const).find((t) => toolUrl(t, sites, mailUi));
   const action: { label: string; icon: typeof ExternalLink; run: () => void; always?: boolean } | null =
-    service.kind === "apache"
+    service.kind === "apache" || service.kind === "nginx"
       ? {
           label: "Open in browser",
           icon: ExternalLink,

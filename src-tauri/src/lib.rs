@@ -95,6 +95,17 @@ fn refresh_shims(app: &AppHandle, settings: &Settings) {
     }
 }
 
+/// Drops "disabled" entries for extensions that are off by default anyway (older builds
+/// stored them) and versions left with no choices.
+fn tidy_extension_choices(settings: &mut Settings) -> bool {
+    let before = settings.php_extensions.clone();
+    for choices in settings.php_extensions.values_mut() {
+        choices.disabled.retain(|name| extensions::DEFAULTS.contains(&name.as_str()));
+    }
+    settings.php_extensions.retain(|_, c| !c.enabled.is_empty() || !c.disabled.is_empty());
+    settings.php_extensions != before
+}
+
 /// Drops active versions whose files are gone (e.g. deleted by hand).
 fn reconcile_versions(settings: &mut Settings) {
     let layout = Layout::new(&settings.root_dir);
@@ -642,7 +653,13 @@ async fn set_php_extension(app: AppHandle, state: State<'_, AppState>, version: 
                 }
             } else {
                 choices.enabled.remove(&name);
-                choices.disabled.insert(name.clone());
+                if extensions::DEFAULTS.contains(&name.as_str()) {
+                    choices.disabled.insert(name.clone());
+                }
+            }
+            // Only differences from the defaults are stored; back to defaults means no entry.
+            if choices.enabled.is_empty() && choices.disabled.is_empty() {
+                s.php_extensions.remove(&version);
             }
         })
         .await?;
@@ -1116,6 +1133,9 @@ pub fn run() {
                 eprintln!("could not create {}: {e}", settings.root_dir.display());
             }
             reconcile_versions(&mut settings);
+            if tidy_extension_choices(&mut settings) {
+                let _ = settings.save(&settings_path);
+            }
             app.manage(AppState {
                 settings: RwLock::new(settings),
                 settings_path,
