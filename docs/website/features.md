@@ -63,6 +63,12 @@ Pick the PHP version for a site from its card on the Sites page. lampRabit runs 
 ### Sensible defaults (Available)
 Each PHP version gets its own `php.ini` with developer-friendly settings: errors shown, 512 MB memory limit, 128 MB uploads, OPcache on (with instant reloads), and common extensions enabled (curl, gd, intl, mbstring, mysqli, openssl, pdo_mysql, pdo_sqlite, sodium, zip and more). Per-project overrides work through a `.user.ini` file in the project.
 
+### PHP extension manager (Coming soon)
+Browse every extension for each installed PHP version, switch them on or off, and add popular extras like Xdebug, Redis, APCu, Imagick, MongoDB and PCOV with one click. Each extension shows whether it's built in, enabled, downloadable for that PHP version, or unavailable on your platform, and why. Xdebug comes preconfigured for step debugging.
+
+### FrankenPHP (Coming soon)
+Run sites on FrankenPHP, the modern PHP application server built on Caddy, as a third option next to Apache and Nginx. It brings HTTP/3 and an optional worker mode that keeps Laravel (Octane) and Symfony apps booted between requests for much faster responses. Uses lampRabit's trusted certificates and Mailpit like every other site. Available on Windows, Linux and Apple Silicon Macs.
+
 ### Worker pools (Available)
 On Windows each PHP version runs as several worker processes (4 by default, adjustable) so pages load in parallel. Crashed workers restart automatically; a worker that keeps crashing is stopped and reported instead of looping.
 
