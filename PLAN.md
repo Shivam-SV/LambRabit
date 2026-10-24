@@ -83,7 +83,11 @@ Browse, enable, disable and add PHP extensions per installed PHP version, with c
 - Extensions with extra requirements are flagged (Imagick needs ImageMagick DLLs; Xdebug gets a ready-made `xdebug.mode=debug` and IDE port setting).
 - Status per extension: built in, enabled, disabled, downloadable, unavailable (with the reason).
 
-### 7.3 FrankenPHP (assessment and plan)
+### 7.3 FrankenPHP: dropped for now
+
+Decision (2026-10-24): not planned. The assessment below is kept for reference if it is revisited.
+
+#### Assessment
 FrankenPHP is a PHP application server built on Caddy: the web server and PHP run in one process, with automatic HTTPS, HTTP/2 and HTTP/3, and a "worker mode" that keeps the application booted between requests (Laravel Octane, Symfony Runtime).
 
 **Availability (checked against v1.13.3 releases):** Linux x86_64 and aarch64, macOS Apple Silicon (no Intel Mac build), and a Windows x86_64 zip. All three platforms can be offered; Intel Macs get "not available" with the reason.
@@ -101,4 +105,4 @@ FrankenPHP is a PHP application server built on Caddy: the web server and PHP ru
 - Extensions are fixed at build time; projects needing an extension that isn't in the build must use Apache/Nginx.
 - Worker mode changes app behaviour (state persists between requests); keep it opt-in with a clear explanation.
 
-**Recommendation:** add FrankenPHP as an optional third server after the extension manager, starting with a spike on Windows and Linux. Effort is moderate because sites, certificates, ports, logs and health checks are already server-agnostic.
+**Recommendation at the time:** an optional third server after the extension manager, starting with a spike on Windows and Linux.

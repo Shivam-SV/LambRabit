@@ -66,9 +66,6 @@ Each PHP version gets its own `php.ini` with developer-friendly settings: errors
 ### PHP extension manager (Coming soon)
 Browse every extension for each installed PHP version, switch them on or off, and add popular extras like Xdebug, Redis, APCu, Imagick, MongoDB and PCOV with one click. Each extension shows whether it's built in, enabled, downloadable for that PHP version, or unavailable on your platform, and why. Xdebug comes preconfigured for step debugging.
 
-### FrankenPHP (Coming soon)
-Run sites on FrankenPHP, the modern PHP application server built on Caddy, as a third option next to Apache and Nginx. It brings HTTP/3 and an optional worker mode that keeps Laravel (Octane) and Symfony apps booted between requests for much faster responses. Uses lampRabit's trusted certificates and Mailpit like every other site. Available on Windows, Linux and Apple Silicon Macs.
-
 ### Worker pools (Available)
 On Windows each PHP version runs as several worker processes (4 by default, adjustable) so pages load in parallel. Crashed workers restart automatically; a worker that keeps crashing is stopped and reported instead of looping.
 
