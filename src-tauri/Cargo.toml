@@ -1,8 +1,10 @@
 [package]
 name = "lamprabit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local PHP/Apache/MariaDB development environment"
 authors = ["Shivam Vastav"]
+license = "MIT"
+repository = "https://github.com/Shivam-SV/LambRabit"
 edition = "2024"
 
 [lib]
