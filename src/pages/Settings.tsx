@@ -14,6 +14,8 @@ import {
   Save,
   Settings2,
   Share2,
+  RefreshCw,
+  Sparkles,
   Stethoscope,
   Sun,
 } from "lucide-react";
@@ -21,6 +23,8 @@ import clsx from "clsx";
 import { api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
+import { installAppUpdate, useAppUpdate } from "../lib/updates";
+import { getVersion } from "@tauri-apps/api/app";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, IconTile, PageHeader, SectionCard, Segmented, Switch, inputClass } from "../components/ui";
 
@@ -366,6 +370,11 @@ export default function Settings() {
           </div>
         </SectionCard>
 
+        <UpdatesCard
+          checkUpdates={draft.checkUpdates}
+          onCheckUpdatesChange={(v) => setDraft({ ...draft, checkUpdates: v })}
+        />
+
         <SharingCard />
 
         <SectionCard
@@ -516,6 +525,64 @@ function SharingCard() {
             tunnel gets a random trycloudflare.com address that lasts until you stop it.
           </p>
         </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boolean; onCheckUpdatesChange: (v: boolean) => void }) {
+  const notify = useAppStore((s) => s.notify);
+  const version = useQuery({ queryKey: ["app-version"], queryFn: getVersion });
+  const { available, checking, error, checked, checkNow } = useAppUpdate();
+  const [progress, setProgress] = useState<number | null | undefined>(undefined);
+
+  const install = async () => {
+    if (!available) return;
+    setProgress(null);
+    try {
+      await installAppUpdate(available, setProgress);
+    } catch (e) {
+      setProgress(undefined);
+      notify("error", String(e));
+    }
+  };
+
+  return (
+    <SectionCard icon={<Sparkles size={22} />} title="Updates" subtitle={`lampRabit ${version.data ?? ""}`} className="lg:col-span-2">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="min-w-60 flex-1 text-sm">
+          {available ? (
+            <>
+              <div className="font-semibold text-accent-text">Version {available.version} is available</div>
+              {available.body && <p className="mt-1 line-clamp-3 whitespace-pre-line text-muted">{available.body}</p>}
+            </>
+          ) : checking ? (
+            <span className="text-muted">Checking for updates…</span>
+          ) : error ? (
+            <span className="text-muted">{error}</span>
+          ) : checked ? (
+            <span className="text-muted">You're on the latest version.</span>
+          ) : (
+            <span className="text-muted">Updates are signed and installed in place; your environment is kept.</span>
+          )}
+        </div>
+        {available ? (
+          <Button variant="primary" onClick={install} disabled={progress !== undefined}>
+            {progress === undefined ? "Install and restart" : progress === null ? "Downloading…" : `Downloading ${progress}%`}
+          </Button>
+        ) : (
+          <Button onClick={() => checkNow()} disabled={checking}>
+            <RefreshCw size={15} className={clsx(checking && "animate-spin")} /> Check for updates
+          </Button>
+        )}
+      </div>
+      <div className="mt-4">
+        <Toggle
+          label="Check when lampRabit starts"
+          hint="Looks for a new release on GitHub; nothing is downloaded until you choose to install."
+          checked={checkUpdates}
+          onChange={onCheckUpdatesChange}
+        />
       </div>
     </SectionCard>
   );

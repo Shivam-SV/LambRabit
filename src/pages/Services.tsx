@@ -16,6 +16,7 @@ import {
 } from "../lib/api";
 import { installKey, useAppStore } from "../lib/store";
 import { toolUrl } from "../lib/tools";
+import { useRuntimeUpdates } from "../lib/updates";
 import { runtimeTiles } from "../components/runtimes";
 import { Button, Card, IconTile, PageHeader } from "../components/ui";
 import NodeCard from "../components/NodeCard";
@@ -229,6 +230,7 @@ function RuntimeRail({
     onSuccess: (_, r) => {
       notify("info", `${label} ${r.version} installed`);
       refresh();
+      queryClient.invalidateQueries({ queryKey: ["runtime-updates"] });
     },
     onError,
   });
@@ -243,6 +245,7 @@ function RuntimeRail({
   });
 
   const have = installed?.versions ?? [];
+  const updates = useRuntimeUpdates().data?.filter((u) => u.runtime === runtime) ?? [];
   const nodes: Node[] = [...new Set([...have, ...(catalog.data ?? []).map((r) => r.version)])]
     .sort(newestFirst)
     .map((version) => ({
@@ -319,6 +322,18 @@ function RuntimeRail({
                     )}
                   </div>
 
+                  {(() => {
+                    const u = updates.find((x) => x.installed === n.version);
+                    return u && !progress ? (
+                      <button
+                        onClick={() => install.mutate(u.release)}
+                        className="-mt-1 text-left text-[11px] font-semibold text-accent-text hover:underline"
+                        title="Installs alongside; switch to it when you're ready"
+                      >
+                        ↑ {u.release.version} available
+                      </button>
+                    ) : null;
+                  })()}
                   {progress ? (
                     <div className="mt-auto space-y-1.5">
                       <div className="text-xs text-muted capitalize">

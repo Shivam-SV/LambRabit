@@ -27,7 +27,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **3. Config templating**: httpd.conf / php.ini / my.ini / php-fpm.conf from templates; MariaDB data-dir init
 - [x] **4. Sites**: `www/foo` → `foo.test` (+ sub-domains, `public/` detection), hosts file kept in sync when Apache starts (one elevation prompt, managed block only), local CA + per-site HTTPS with a global default, System log stream persisted to `logs/lampRabit.log`, log history read from disk with clear, OS-specific settings hidden elsewhere
 - [x] **5. Developer utilities**: Adminer / phpMyAdmin at `adminer.test`; Mailpit as a managed service (SMTP 1025, UI 8025) with PHP `mail()` routed to it (Windows: `SMTP`/`smtp_port`; macOS/Linux: `sendmail_path = mailpit sendmail`) and a panel explaining SMTP vs `mail()` settings for frameworks
-- [ ] **6. Feature set** (see below)
+- [x] **6. Feature set** (see below)
 - [ ] **7. Comfort and PHP tooling** (see below)
 - [ ] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI
 
@@ -61,7 +61,7 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
   - Cloudflare quick tunnels (`cloudflared`): no account needed, random `trycloudflare.com` URL.
 - **Redis / Memcached**: no official Windows builds for either. Windows: Redis-compatible alternative (Garnet) or Memurai, or "not available" with explanation; macOS/Linux: manage a package-manager install (brew/apt) or a downloaded build. PHP extensions (`redis`, `memcached`) offered only where builds exist for the active PHP.
 
-### 6.5 Updates
+### 6.5 Updates ✅
 - **App updates**: Tauri updater with signed releases on GitHub; check on start (opt-out) and from Settings. Depends on the release pipeline in phase 8.
 - **Runtime updates**: badge when a newer patch of an installed Apache/PHP/MariaDB is available.
 

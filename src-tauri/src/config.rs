@@ -26,6 +26,8 @@ pub struct Settings {
     pub manage_hosts: bool,
     /// Point PHP's mail() at Mailpit while Mailpit is installed.
     pub route_mail: bool,
+    /// Look for a new lampRabit release when the app starts.
+    pub check_updates: bool,
     /// Per-site overrides keyed by folder name.
     pub sites: BTreeMap<String, SiteSettings>,
 }
@@ -127,6 +129,7 @@ impl Default for Settings {
             https_by_default: true,
             manage_hosts: true,
             route_mail: true,
+            check_updates: true,
             sites: BTreeMap::new(),
         }
     }

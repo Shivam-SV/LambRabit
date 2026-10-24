@@ -10,6 +10,7 @@ import {
   type StatusEvent,
 } from "./lib/api";
 import { useAppStore } from "./lib/store";
+import { useAppUpdate } from "./lib/updates";
 import Overview from "./pages/Overview";
 import Sites from "./pages/Sites";
 import Logs from "./pages/Logs";
@@ -55,8 +56,20 @@ function useBackendEvents() {
   }, [queryClient, pushLog, loadHistory, notify, setInstall, record]);
 }
 
+function useStartupUpdateCheck() {
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => {
+        if (s.checkUpdates) useAppUpdate.getState().checkNow();
+      })
+      .catch(() => {});
+  }, []);
+}
+
 export default function App() {
   const page = useAppStore((s) => s.page);
+  useStartupUpdateCheck();
   const scroller = useRef<HTMLDivElement>(null);
   useBackendEvents();
   useEffect(() => {

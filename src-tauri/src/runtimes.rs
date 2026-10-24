@@ -672,3 +672,36 @@ pub fn remove(layout: &Layout, runtime: Runtime, version: &str) -> Result<()> {
     std::fs::remove_dir_all(dir)?;
     Ok(())
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNotice {
+    pub runtime: Runtime,
+    pub installed: String,
+    pub release: Release,
+}
+
+/// Newer patch releases for installed versions: same "major.minor" line (for example
+/// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
+pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis]
+        .into_iter()
+        .map(|runtime| async move {
+            let installed = installed(layout, runtime);
+            if installed.is_empty() {
+                return Vec::new();
+            }
+            let Ok(catalog) = available(client, runtime).await else { return Vec::new() };
+            let line = |v: &str| v.split('.').take(2).collect::<Vec<_>>().join(".");
+            let mut out = Vec::new();
+            for have in &installed {
+                if let Some(newer) = catalog.iter().find(|r| {
+                    line(&r.version) == line(have) && version_key(&r.version) > version_key(have) && !installed.contains(&r.version)
+                }) {
+                    out.push(UpdateNotice { runtime, installed: have.clone(), release: newer.clone() });
+                }
+            }
+            out
+        });
+    futures_util::future::join_all(checks).await.into_iter().flatten().collect()
+}

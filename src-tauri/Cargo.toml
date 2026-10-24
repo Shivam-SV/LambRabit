@@ -37,6 +37,8 @@ sha1 = "0.10"
 base64 = "0.22"
 lzma-rs = "0.3"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

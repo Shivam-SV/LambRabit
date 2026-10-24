@@ -1,6 +1,7 @@
 import { FileText, Globe, House, Layers, Settings } from "lucide-react";
 import clsx from "clsx";
 import { useAppStore, type PageId } from "../lib/store";
+import { useRuntimeUpdates } from "../lib/updates";
 
 const items: { id: PageId; label: string; icon: typeof House }[] = [
   { id: "overview", label: "Overview", icon: House },
@@ -13,6 +14,7 @@ const items: { id: PageId; label: string; icon: typeof House }[] = [
 export default function BottomNav() {
   const page = useAppStore((s) => s.page);
   const navigate = useAppStore((s) => s.navigate);
+  const runtimeUpdates = useRuntimeUpdates().data?.length ?? 0;
 
   return (
     <nav className="fixed inset-x-0 bottom-4 z-10 flex justify-center px-4">
@@ -29,7 +31,12 @@ export default function BottomNav() {
                 : "text-muted hover:bg-surface-2 hover:text-fg",
             )}
           >
-            <Icon size={21} strokeWidth={page === id ? 2 : 1.6} />
+            <span className="relative">
+              <Icon size={21} strokeWidth={page === id ? 2 : 1.6} />
+              {id === "services" && runtimeUpdates > 0 && (
+                <span className="absolute -top-0.5 -right-1 size-2 rounded-full bg-accent ring-2 ring-surface" aria-label="Updates available" />
+              )}
+            </span>
             {label}
           </button>
         ))}

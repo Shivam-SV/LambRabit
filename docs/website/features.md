@@ -164,9 +164,13 @@ Overview dashboard with live status, quick links and recent activity; light, dar
 ### Platform-aware (Available)
 Settings and tools only appear where they apply. For example the PHP worker count is a Windows setting, and hosts-file paths and certificate steps match your OS.
 
+### App updates (Available from the first release)
+lampRabit checks GitHub for a new version when it starts (you can turn this off), shows it in the title bar, and installs it in place after you confirm. Updates are cryptographically signed; your environment, sites and databases are untouched.
+
+### Runtime update notices (Available)
+When a newer patch of an installed Apache, Nginx, PHP, MariaDB, Mailpit, Adminer, phpMyAdmin or Redis is available (for example PHP 8.4.27 → 8.4.30), Services shows a badge and a one-click install. New versions are installed alongside the old one; you switch when you're ready.
+
 ### Coming soon
-- **App updates**: lampRabit checks for new versions and updates itself (signed releases).
-- **Runtime update notices**: a badge when a newer patch of an installed Apache, PHP or MariaDB is available.
 - **Installers**: Windows (`.exe` / `.msi`), macOS (`.dmg`), Linux (`.AppImage`, `.deb`).
 
 ---

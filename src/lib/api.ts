@@ -42,6 +42,12 @@ export const runtimeLabels: Record<Runtime, string> = {
   dotnet: ".NET runtime",
 };
 
+export interface UpdateNotice {
+  runtime: Runtime;
+  installed: string;
+  release: Release;
+}
+
 export type TunnelProvider = "ngrok" | "cloudflare";
 
 export interface Tunnel {
@@ -233,6 +239,7 @@ export interface Settings {
   httpsByDefault: boolean;
   manageHosts: boolean;
   routeMail: boolean;
+  checkUpdates: boolean;
   sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null }>;
 }
 
@@ -270,6 +277,7 @@ export const api = {
   nodeUse: (version: string) => invoke<void>("node_use", { version }),
   nodeUninstall: (version: string) => invoke<void>("node_uninstall", { version }),
   nvmInstall: () => invoke<void>("nvm_install"),
+  runtimeUpdates: () => invoke<UpdateNotice[]>("runtime_updates"),
   setNgrokToken: (token: string | null) => invoke<void>("set_ngrok_token", { token }),
   trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),

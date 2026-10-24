@@ -6,6 +6,7 @@ import { Copy, FolderOpen, Minus, Play, Square, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
+import { useAppUpdate } from "../lib/updates";
 import Logo from "./Logo";
 import { Button } from "./ui";
 
@@ -16,6 +17,8 @@ import { Button } from "./ui";
  */
 export default function Titlebar() {
   const notify = useAppStore((s) => s.notify);
+  const navigate = useAppStore((s) => s.navigate);
+  const update = useAppUpdate((s) => s.available);
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
@@ -45,6 +48,14 @@ export default function Titlebar() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {update && (
+          <button
+            onClick={() => navigate("settings")}
+            className="rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold text-accent-text hover:brightness-95"
+          >
+            Update {update.version} available
+          </button>
+        )}
         <Button size="sm" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data}>
           <FolderOpen size={15} /> Open www
         </Button>

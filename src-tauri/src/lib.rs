@@ -502,6 +502,12 @@ async fn nvm_install(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
+async fn runtime_updates(state: State<'_, AppState>) -> Result<Vec<runtimes::UpdateNotice>> {
+    let (_, layout) = state.snapshot().await;
+    Ok(runtimes::updates(&state.http, &layout).await)
+}
+
+#[tauri::command]
 async fn php_status(state: State<'_, AppState>) -> Result<Vec<php::PoolStatus>> {
     Ok(state.supervisor.php.status().await)
 }
@@ -923,6 +929,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.toml");
             let mut settings = Settings::load(&settings_path)?;
@@ -992,6 +1000,7 @@ pub fn run() {
             set_site_server,
             php_status,
             create_project,
+            runtime_updates,
             node_status,
             node_available,
             node_install,
