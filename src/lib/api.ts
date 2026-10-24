@@ -251,6 +251,7 @@ export interface Settings {
   routeMail: boolean;
   checkUpdates: boolean;
   closeToTray: boolean;
+  addToPath: boolean;
   startServicesOnLaunch: boolean;
   editor: string;
   sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null }>;

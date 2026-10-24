@@ -185,6 +185,16 @@ export default function Settings() {
             />
             <AutostartToggle />
             <Toggle
+              label="Add PHP, Composer and MariaDB to PATH"
+              hint={
+                os === "windows"
+                  ? "Run php, composer, mysql and mariadb-dump from any terminal, always at your active versions. Applies to terminals opened after saving."
+                  : "Adds the shims folder to your shell profile (.zshrc / .bashrc). Applies to terminals opened after saving."
+              }
+              checked={draft.addToPath}
+              onChange={(v) => setDraft({ ...draft, addToPath: v })}
+            />
+            <Toggle
               label="Start services when lampRabit opens"
               hint="Starts every installed service, so your sites are up right after you sign in."
               checked={draft.startServicesOnLaunch}

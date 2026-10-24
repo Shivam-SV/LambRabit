@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -40,6 +41,7 @@ import { useAppStore, type Activity } from "../lib/store";
 import { toolUrl } from "../lib/tools";
 import { runtimeTiles } from "../components/runtimes";
 import { formatClock, formatUptime, useNow } from "../lib/time";
+import { randomQuote } from "../lib/quotes";
 import { Button, Card, Pill } from "../components/ui";
 import Menu from "../components/Menu";
 import ProblemPanel from "../components/ProblemPanel";
@@ -63,6 +65,7 @@ const serviceMeta: Record<ServiceKind, { icon: typeof Feather; tile: string; blu
 
 export default function Overview() {
   const now = useNow();
+  const [quote] = useState(randomQuote);
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 15_000 });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
@@ -99,7 +102,15 @@ export default function Overview() {
             {greeting.text}, developer
             <greeting.icon size={34} strokeWidth={1.75} className="text-accent-text" />
           </h1>
-          <p className="mt-2 text-lg text-muted">{status.line}</p>
+          {/* Setup steps and problems need saying; otherwise the status card covers it. */}
+          {status.tone === "danger" || installed.length === 0 ? (
+            <p className="mt-2 text-lg text-muted">{status.line}</p>
+          ) : (
+            <figure className="mt-2 max-w-2xl">
+              <blockquote className="text-lg text-muted italic">“{quote.text}”</blockquote>
+              <figcaption className="mt-0.5 text-sm text-muted/80">— {quote.author}</figcaption>
+            </figure>
+          )}
         </div>
         <div
           className={clsx(

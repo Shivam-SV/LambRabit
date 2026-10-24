@@ -30,6 +30,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// Closing the window keeps lampRabit (and its services) running in the tray.
     pub close_to_tray: bool,
+    /// Put the shims folder (php, composer, mariadb…) on the user's PATH.
+    pub add_to_path: bool,
     /// Start every installed service when lampRabit opens.
     pub start_services_on_launch: bool,
     /// Command used for "Open in editor" (e.g. "code", "cursor", "phpstorm").
@@ -146,6 +148,7 @@ impl Default for Settings {
             route_mail: true,
             check_updates: true,
             close_to_tray: true,
+            add_to_path: false,
             start_services_on_launch: false,
             editor: "code".into(),
             sites: BTreeMap::new(),

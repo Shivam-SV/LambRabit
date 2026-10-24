@@ -12,6 +12,7 @@ mod procgroup;
 mod projects;
 mod runtimes;
 mod services;
+mod shims;
 mod sites;
 mod ssl;
 mod tunnels;
@@ -50,6 +51,7 @@ impl AppState {
         let mut settings = self.settings.write().await;
         f(&mut settings);
         settings.save(&self.settings_path)?;
+        let _ = shims::write(&settings, &Layout::new(&settings.root_dir));
         Ok(settings.clone())
     }
 }
@@ -84,6 +86,12 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         // Tunnels start on demand; nothing to restart.
         Runtime::Ngrok | Runtime::Cloudflared => &[],
         Runtime::Redis | Runtime::Dotnet => &[ServiceKind::Redis],
+    }
+}
+
+fn refresh_shims(app: &AppHandle, settings: &Settings) {
+    if let Err(e) = shims::write(settings, &Layout::new(&settings.root_dir)) {
+        logs::system(app, logs::Level::Warn, format!("Couldn't update command shims: {e}"));
     }
 }
 
@@ -129,8 +137,15 @@ async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings:
     let layout = Layout::new(&settings.root_dir);
     layout.ensure()?;
     reconcile_versions(&mut settings);
+    let was_on_path = state.settings.read().await.add_to_path;
+    if settings.add_to_path != was_on_path {
+        shims::set_on_path(&layout, settings.add_to_path)?;
+        let what = if settings.add_to_path { "added to" } else { "removed from" };
+        logs::system(&app, logs::Level::Info, format!("{} {what} your PATH", shims::dir(&layout).display()));
+    }
     settings.save(&state.settings_path)?;
     *state.settings.write().await = settings.clone();
+    refresh_shims(&app, &settings);
     *state.ca_trusted.lock().await = None;
     logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
     logs::system(&app, logs::Level::Info, "Settings saved");
@@ -414,6 +429,7 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
         logs::system(&app, logs::Level::Error, format!("Creating project {name} failed: {e}"));
         return Err(e);
     }
+    refresh_shims(&app, &settings); // Composer may have just been installed
     ctx.step("Adding the site to the web server");
     restart_web_servers(&app, &state).await?;
     logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
@@ -1115,6 +1131,9 @@ pub fn run() {
                 logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
             }
             logs::system(app.handle(), logs::Level::Info, format!("lampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
+            if let Ok(settings) = app.state::<AppState>().settings.try_read() {
+                refresh_shims(app.handle(), &settings);
+            }
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

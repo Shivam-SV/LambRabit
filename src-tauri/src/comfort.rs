@@ -9,71 +9,48 @@ use crate::{
     config::Settings,
     error::{Error, Result},
     layout::Layout,
-    procgroup,
+    procgroup, shims,
 };
 
-/// Folders added to PATH in lampRabit terminals: active PHP, Composer, MariaDB client.
-fn tool_paths(settings: &Settings, layout: &Layout) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(v) = &settings.versions.php {
-        paths.push(layout.bin("php", v));
-    }
-    let composer = layout.root().join("bin").join("composer");
-    if composer.join("composer.phar").exists() {
-        write_composer_shim(&composer);
-        paths.push(composer);
-    }
-    if let Some(v) = &settings.versions.mariadb {
-        paths.push(layout.bin("mariadb", v).join("bin"));
-    }
-    paths.retain(|p| p.exists());
-    paths
-}
-
-/// `composer` as a command next to composer.phar.
-fn write_composer_shim(dir: &Path) {
-    if cfg!(windows) {
-        let _ = std::fs::write(dir.join("composer.bat"), "@php \"%~dp0composer.phar\" %*\r\n");
-    } else {
-        let shim = dir.join("composer");
-        if std::fs::write(&shim, "#!/bin/sh\nexec php \"$(dirname \"$0\")/composer.phar\" \"$@\"\n").is_ok() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755));
-            }
-        }
-    }
-}
-
-/// Opens a terminal in `dir` with lampRabit's tools first on PATH.
+/// Opens a terminal in `dir` with lampRabit's command shims (php, composer, mariadb…) first on PATH.
 pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result<()> {
+    let shims = shims::write(settings, layout)?;
     let existing = std::env::var_os("PATH").unwrap_or_default();
-    let path = std::env::join_paths(tool_paths(settings, layout).into_iter().chain(std::env::split_paths(&existing)))
+    let path = std::env::join_paths(std::iter::once(shims).chain(std::env::split_paths(&existing)))
         .map_err(|e| Error::msg(e.to_string()))?;
-    if cfg!(windows) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // `start` gives the terminal its own console (and its own input; a cmd spawned
+        // directly would inherit lampRabit's empty stdin and exit at once). The first quoted
+        // argument is the window title; unquoted, `start` would launch it as a program.
         std::process::Command::new("cmd")
-            .args(["/C", "start", "lampRabit", "cmd", "/K", "echo lampRabit terminal: php, composer and mariadb are on PATH"])
+            .raw_arg(r#"/C start "lampRabit" cmd /K echo lampRabit terminal: php, composer and mariadb use your active versions."#)
             .current_dir(dir)
             .env("PATH", path)
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()?;
         return Ok(());
     }
-    if cfg!(target_os = "macos") {
-        let script = format!(
-            "tell application \"Terminal\" to do script \"cd '{}'; export PATH='{}'\"",
-            dir.display(),
-            path.to_string_lossy()
-        );
-        std::process::Command::new("osascript").args(["-e", &script, "-e", "tell application \"Terminal\" to activate"]).spawn()?;
-        return Ok(());
-    }
-    for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"] {
-        if std::process::Command::new(term).current_dir(dir).env("PATH", &path).spawn().is_ok() {
+    #[cfg(not(windows))]
+    {
+        if cfg!(target_os = "macos") {
+            let script = format!(
+                "tell application \"Terminal\" to do script \"cd '{}'; export PATH='{}'\"",
+                dir.display(),
+                path.to_string_lossy()
+            );
+            std::process::Command::new("osascript").args(["-e", &script, "-e", "tell application \"Terminal\" to activate"]).spawn()?;
             return Ok(());
         }
+        for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"] {
+            if std::process::Command::new(term).current_dir(dir).env("PATH", &path).spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        Err(Error::msg("No terminal emulator found."))
     }
-    Err(Error::msg("No terminal emulator found."))
 }
 
 /// Opens a folder in the configured editor command (VS Code's `code` by default).

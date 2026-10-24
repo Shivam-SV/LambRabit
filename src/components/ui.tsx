@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import clsx from "clsx";
 
 type Variant = "primary" | "secondary" | "soft" | "danger" | "ghost";
@@ -91,28 +92,38 @@ export function Switch({
   checked,
   onChange,
   label,
+  busy = false,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
+  /** Shows a spinner in the knob while the change is being applied. */
+  busy?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-busy={busy || undefined}
+      disabled={disabled || busy}
       onClick={() => onChange(!checked)}
       className={clsx(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+        "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed",
         checked ? "bg-accent" : "bg-muted/40",
+        disabled && !busy && "opacity-50",
       )}
     >
       <span
         className={clsx(
-          "absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-300 ease-(--ease-spring)",
+          "absolute top-0.5 left-0.5 flex size-5 items-center justify-center rounded-full bg-white shadow transition-transform duration-300 ease-(--ease-spring)",
           checked && "translate-x-5",
         )}
-      />
+      >
+        {busy && <Loader2 size={13} strokeWidth={2.5} className="animate-spin text-accent" />}
+      </span>
     </button>
   );
 }

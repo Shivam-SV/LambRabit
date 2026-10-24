@@ -120,6 +120,8 @@ body,
 
 body {
   @apply bg-bg text-fg antialiased select-none;
+  /* The app scrolls inside its own container; the window itself never should. */
+  overflow: hidden;
 }
 
 /* Animated dashes for live links in the stack diagram. */
