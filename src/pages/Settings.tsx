@@ -1,0 +1,102 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Save } from "lucide-react";
+import { api, type Settings as SettingsT } from "../lib/api";
+import { useAppStore } from "../lib/store";
+import { Button, Card, PageHeader } from "../components/ui";
+
+const portFields = [
+  { key: "http", label: "HTTP" },
+  { key: "https", label: "HTTPS" },
+  { key: "mysql", label: "MariaDB" },
+  { key: "phpFpm", label: "PHP-FPM (macOS/Linux)" },
+] as const;
+
+export default function Settings() {
+  const queryClient = useQueryClient();
+  const notify = useAppStore((s) => s.notify);
+  const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const [draft, setDraft] = useState<SettingsT | null>(null);
+
+  useEffect(() => {
+    if (settings.data) setDraft(settings.data);
+  }, [settings.data]);
+
+  const save = useMutation({
+    mutationFn: api.saveSettings,
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["settings"], saved);
+      queryClient.invalidateQueries({ queryKey: ["services"] });
+      queryClient.invalidateQueries({ queryKey: ["paths"] });
+      notify("info", "Settings saved");
+    },
+    onError: (e) => notify("error", String(e)),
+  });
+
+  if (!draft) return null;
+
+  return (
+    <>
+      <PageHeader
+        title="Settings"
+        actions={
+          <Button variant="primary" onClick={() => save.mutate(draft)} disabled={save.isPending}>
+            <Save size={14} /> Save
+          </Button>
+        }
+      />
+      <div className="max-w-2xl space-y-4 px-8 pb-8">
+        <Card className="space-y-4 p-5">
+          <h2 className="font-medium">General</h2>
+          <Field label="Environment root" hint="Holds runtimes, configs, www, databases and logs.">
+            <input
+              className={inputClass}
+              value={draft.rootDir}
+              onChange={(e) => setDraft({ ...draft, rootDir: e.target.value })}
+            />
+          </Field>
+          <Field label="Site domain suffix" hint={`Folders in www/ are served as <name>.${draft.tld}`}>
+            <input
+              className={inputClass}
+              value={draft.tld}
+              onChange={(e) => setDraft({ ...draft, tld: e.target.value.replace(/^\.+/, "") })}
+            />
+          </Field>
+        </Card>
+
+        <Card className="space-y-4 p-5">
+          <h2 className="font-medium">Ports</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {portFields.map(({ key, label }) => (
+              <Field key={key} label={label}>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  className={inputClass}
+                  value={draft.ports[key]}
+                  onChange={(e) =>
+                    setDraft({ ...draft, ports: { ...draft.ports, [key]: Number(e.target.value) } })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+const inputClass =
+  "w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 dark:border-zinc-700 dark:bg-zinc-950";
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-sm font-medium">{label}</span>
+      {children}
+      {hint && <span className="block text-xs text-zinc-500">{hint}</span>}
+    </label>
+  );
+}
