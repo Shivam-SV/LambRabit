@@ -92,7 +92,7 @@ export default function Overview() {
           : { tone: "muted", title: "All services stopped", line: "Start your stack to begin working." };
 
   return (
-    <div className="space-y-6">
+    <div className="motion-stagger space-y-6">
       <section className="flex flex-wrap items-center justify-between gap-6">
         <div>
           <h1 className="flex items-center gap-3 text-4xl font-extrabold tracking-tight">
@@ -386,7 +386,7 @@ function QuickLinks({ sites, services, mailUi }: { sites?: SitesInfo; services: 
             <button
               key={tool}
               onClick={() => (url ? openUrl(url).catch((e) => notify("error", String(e))) : navigate("services"))}
-              className="group flex items-center gap-3 rounded-2xl border border-line bg-surface p-4 text-left shadow-card transition-colors hover:border-accent/40"
+              className="group motion-lift flex items-center gap-3 rounded-2xl border border-line bg-surface p-4 text-left shadow-card hover:border-accent/40"
             >
               <div className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl", tiles.className)}>
                 {tiles.icon(20)}

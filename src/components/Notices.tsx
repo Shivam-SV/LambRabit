@@ -12,7 +12,7 @@ export default function Notices() {
         <div
           key={n.id}
           className={clsx(
-            "pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
+            "motion-toast pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
             n.tone === "error"
               ? "border-danger/30 bg-danger-soft text-danger-text backdrop-blur"
               : "border-line bg-surface text-fg",

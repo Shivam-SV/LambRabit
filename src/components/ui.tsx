@@ -27,7 +27,7 @@ export function Button({
     <button
       {...props}
       className={clsx(
-        "inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "motion-press inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50",
         sizes[size],
         variants[variant],
         className,
@@ -109,7 +109,7 @@ export function Switch({
     >
       <span
         className={clsx(
-          "absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform",
+          "absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-300 ease-(--ease-spring)",
           checked && "translate-x-5",
         )}
       />

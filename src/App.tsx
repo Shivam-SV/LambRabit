@@ -80,7 +80,7 @@ export default function App() {
     <div className="flex h-full flex-col">
       <Titlebar />
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <main className="mx-auto max-w-6xl px-6 pt-8 pb-32 sm:px-10">
+        <main key={page} className="motion-page mx-auto max-w-6xl px-6 pt-8 pb-32 sm:px-10">
           {page === "overview" && <Overview />}
           {page === "sites" && <Sites />}
           {page === "services" && <Services />}

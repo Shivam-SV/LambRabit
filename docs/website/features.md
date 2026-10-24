@@ -169,7 +169,10 @@ One click produces a report with versions, Microsoft runtime presence, service h
 ## 8. App
 
 ### Modern interface (Available)
-Overview dashboard with live status, quick links and recent activity; light, dark and system themes; custom title bar; works at any window size.
+Overview dashboard with live status, quick links and recent activity; light, dark and system themes; custom title bar; works at any window size. Subtle motion makes it feel responsive: pages and dialogs ease in, buttons give under the cursor, and the rabbit in the title bar twitches its ears, looks around and wiggles its nose every few minutes.
+
+### Motion you control (Available)
+Settings → Appearance → Motion: follow the system's reduce-motion preference (default), full motion, reduced (gentle fades only; nothing slides, bounces or plays by itself), or off.
 
 ### Platform-aware (Available)
 Settings and tools only appear where they apply. For example the PHP worker count is a Windows setting, and hosts-file paths and certificate steps match your OS.

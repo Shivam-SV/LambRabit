@@ -39,7 +39,7 @@ export default function Titlebar() {
         os === "macos" ? "pr-4 pl-20" : "pl-5",
       )}
     >
-      <Logo className="pointer-events-none size-9 shrink-0" />
+      <Logo animated className="pointer-events-none size-9 shrink-0" />
       <div className="pointer-events-none leading-tight">
         <div className="font-bold tracking-tight">
           lamp<span className="text-accent-text">Rabit</span>

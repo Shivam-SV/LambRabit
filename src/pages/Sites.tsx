@@ -139,7 +139,7 @@ export default function Sites() {
           </Button>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="motion-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data?.sites.map((site) => <SiteCard key={site.path} site={site} />)}
         </div>
       )}

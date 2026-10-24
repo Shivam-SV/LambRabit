@@ -43,7 +43,7 @@ export default function Menu({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={clsx(
-          "flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg",
+          "motion-press flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg",
           !plain && "border border-line",
         )}
       >
@@ -52,7 +52,7 @@ export default function Menu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1.5 min-w-48 rounded-xl border border-line bg-surface p-1 shadow-float"
+          className="motion-pop absolute right-0 z-20 mt-1.5 min-w-48 rounded-xl border border-line bg-surface p-1 shadow-float"
         >
           {items.map((item) => (
             <button

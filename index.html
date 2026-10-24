@@ -10,6 +10,11 @@
       try {
         const t = localStorage.getItem("theme");
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        const m = localStorage.getItem("motion");
+        document.documentElement.dataset.motion =
+          m === "full" || m === "reduced" || m === "off"
+            ? m
+            : matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduced" : "full";
       } catch {}
     </script>
   </head>

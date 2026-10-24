@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   CheckCircle2,
+  CircleSlash,
+  Feather,
   FolderOpen,
   Layers,
   LifeBuoy,
@@ -18,11 +20,13 @@ import {
   Sparkles,
   Stethoscope,
   Sun,
+  Wind,
 } from "lucide-react";
 import clsx from "clsx";
 import { api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
+import { useMotion } from "../lib/motion";
 import { installAppUpdate, useAppUpdate } from "../lib/updates";
 import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
@@ -63,6 +67,7 @@ export default function Settings() {
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
   const { theme, setTheme } = useTheme();
+  const { motion, setMotion } = useMotion();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
@@ -144,7 +149,7 @@ export default function Settings() {
         }
       />
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="motion-stagger grid gap-5 lg:grid-cols-2">
         <SectionCard icon={<Settings2 size={22} />} title="General" subtitle="Basic configuration for your local environment.">
           <div className="space-y-5">
             <Field label="Environment root" hint="Holds runtimes, configs, www, databases and logs.">
@@ -316,19 +321,47 @@ export default function Settings() {
           subtitle="Choose how lampRabit looks on your device."
           className="lg:col-span-2"
         >
-          <Segmented
-            value={theme}
-            onChange={setTheme}
-            className="py-1.5"
-            options={[
-              { value: "system", label: "System", icon: <Monitor size={16} /> },
-              { value: "light", label: "Light", icon: <Sun size={16} /> },
-              { value: "dark", label: "Dark", icon: <Moon size={16} /> },
-            ]}
-          />
-          <p className="mt-3 text-sm text-muted">
-            Automatically match your system theme, or choose a light or dark theme. Applies instantly.
-          </p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <div className="mb-2 text-sm font-medium">Theme</div>
+              <Segmented
+                value={theme}
+                onChange={setTheme}
+                className="py-1.5"
+                options={[
+                  { value: "system", label: "System", icon: <Monitor size={16} /> },
+                  { value: "light", label: "Light", icon: <Sun size={16} /> },
+                  { value: "dark", label: "Dark", icon: <Moon size={16} /> },
+                ]}
+              />
+              <p className="mt-3 text-sm text-muted">
+                Automatically match your system theme, or choose a light or dark theme. Applies instantly.
+              </p>
+            </div>
+            <div>
+              <div className="mb-2 text-sm font-medium">Motion</div>
+              <Segmented
+                value={motion}
+                onChange={setMotion}
+                className="py-1.5"
+                options={[
+                  { value: "system", label: "System", icon: <Monitor size={16} /> },
+                  { value: "full", label: "Full", icon: <Wind size={16} /> },
+                  { value: "reduced", label: "Reduced", icon: <Feather size={16} /> },
+                  { value: "off", label: "Off", icon: <CircleSlash size={16} /> },
+                ]}
+              />
+              <p className="mt-3 text-sm text-muted">
+                {motion === "system"
+                  ? "Follows your system's reduce-motion setting."
+                  : motion === "full"
+                    ? "Transitions, the animated logo and live diagram flows."
+                    : motion === "reduced"
+                      ? "Gentle fades only: nothing slides, bounces or plays on its own."
+                      : "No animation at all. Loading spinners keep turning so you can tell work is happening."}
+              </p>
+            </div>
+          </div>
         </SectionCard>
 
         <SectionCard

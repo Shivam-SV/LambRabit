@@ -18,20 +18,24 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed inset-x-0 bottom-4 z-10 flex justify-center px-4">
-      <div className="flex items-center gap-1 rounded-2xl border border-line bg-nav p-1.5 shadow-float backdrop-blur-md">
+      <div className="relative flex items-center gap-1 rounded-2xl border border-line bg-nav p-1.5 shadow-float backdrop-blur-md">
+        {/* One highlight that glides to the active tab (button width + gap = 5.5rem). */}
+        <span
+          aria-hidden
+          className="absolute inset-y-1.5 left-1.5 w-[5.25rem] rounded-xl bg-accent-soft transition-transform duration-300 ease-(--ease-spring)"
+          style={{ transform: `translateX(${Math.max(0, items.findIndex((i) => i.id === page)) * 5.5}rem)` }}
+        />
         {items.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => navigate(id)}
             aria-current={page === id ? "page" : undefined}
             className={clsx(
-              "flex w-[5.25rem] flex-col items-center gap-1 rounded-xl py-2 text-xs transition-colors",
-              page === id
-                ? "bg-accent-soft font-semibold text-accent-text"
-                : "text-muted hover:bg-surface-2 hover:text-fg",
+              "group relative flex w-[5.25rem] flex-col items-center gap-1 rounded-xl py-2 text-xs transition-colors",
+              page === id ? "font-semibold text-accent-text" : "text-muted hover:bg-surface-2/60 hover:text-fg",
             )}
           >
-            <span className="relative">
+            <span className="relative transition-transform duration-200 ease-(--ease-spring) group-hover:-translate-y-0.5 group-active:scale-90 still:translate-none still:scale-100">
               <Icon size={21} strokeWidth={page === id ? 2 : 1.6} />
               {id === "services" && runtimeUpdates > 0 && (
                 <span className="absolute -top-0.5 -right-1 size-2 rounded-full bg-accent ring-2 ring-surface" aria-label="Updates available" />

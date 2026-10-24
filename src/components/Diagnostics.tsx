@@ -49,11 +49,11 @@ export default function Diagnostics() {
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-6" onMouseDown={() => setOpen(false)}>
+    <div className="motion-backdrop fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-6" onMouseDown={() => setOpen(false)}>
       <div
         role="dialog"
         aria-label="Diagnostics"
-        className="flex max-h-full w-full max-w-3xl flex-col rounded-2xl border border-line bg-surface shadow-float"
+        className="motion-dialog flex max-h-full w-full max-w-3xl flex-col rounded-2xl border border-line bg-surface shadow-float"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-line px-6 py-4">
