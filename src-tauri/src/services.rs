@@ -13,6 +13,8 @@ use crate::{
     config::Settings,
     configs,
     error::{Error, Result},
+    logs::{self, Level},
+    sites,
     layout::{Layout, exe},
     procgroup::{self, ProcGroup},
 };
@@ -78,7 +80,7 @@ impl ServiceKind {
         }
     }
 
-    /// The service's own error log (stdout/stderr go to `<id>.log`).
+    /// The service's own error log (stdout/stderr go to `<id>-output.log`).
     pub fn log_path(self, layout: &Layout) -> PathBuf {
         let file = match self {
             Self::Apache => "apache-error.log",
@@ -192,20 +194,43 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
 }
 
 /// Writes configs and does first-run setup for a service.
-async fn prepare(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
+async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<()> {
     layout.ensure()?;
     match kind {
         ServiceKind::Apache => {
             if cfg!(windows) && settings.versions.php.is_some() {
                 configs::write_php(settings, layout)?;
             }
-            configs::write_apache(settings, layout)
+            let sites = sites::scan(settings, layout);
+            if sites.iter().any(|s| s.ssl) && !port_free(settings.ports.https) {
+                return Err(Error::msg(format!("HTTPS port {} is already in use", settings.ports.https)));
+            }
+            if sites::write_vhosts(settings, layout, &sites)? {
+                logs::system(app, Level::Info, "Created the local certificate authority for HTTPS sites");
+            }
+            configs::write_apache(settings, layout)?;
+            let _ = std::fs::remove_file(configs::apache_pid_file(layout));
+            sync_hosts(app, settings, layout, &sites).await;
+            Ok(())
         }
         ServiceKind::Mariadb => {
             configs::write_mariadb(settings, layout)?;
             configs::init_mariadb_data(settings, layout).await
         }
         ServiceKind::PhpFpm => configs::write_php(settings, layout),
+    }
+}
+
+/// Brings the hosts file in line with the site list. A failure (e.g. a cancelled admin
+/// prompt) is logged but never blocks Apache from starting.
+pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, sites: &[sites::Site]) {
+    if !settings.manage_hosts || !sites::needs_hosts_file(settings) || sites::hosts_in_sync(sites) {
+        return;
+    }
+    logs::system(app, Level::Info, format!("Updating the hosts file for {} site(s)", sites.len()));
+    match sites::update_hosts(layout, sites).await {
+        Ok(()) => logs::system(app, Level::Info, "Hosts file updated"),
+        Err(e) => logs::system(app, Level::Warn, format!("{e} Sites may not resolve until the hosts file is updated.")),
     }
 }
 
@@ -290,12 +315,15 @@ impl Supervisor {
             );
         }
         emit_status(app, kind, ServiceState::Starting, None);
+        let version = kind.version(settings).unwrap_or_default();
+        logs::system(app, Level::Info, format!("Starting {} {version}", kind.label()));
 
         match self.spawn(app, kind, settings, layout).await {
             Ok(()) => Ok(()),
             Err(e) => {
                 self.running.lock().await.remove(&kind);
                 emit_status(app, kind, ServiceState::Stopped, None);
+                logs::system(app, Level::Error, format!("{} failed to start: {e}", kind.label()));
                 Err(e)
             }
         }
@@ -314,12 +342,12 @@ impl Supervisor {
         if !port_free(port) {
             return Err(Error::msg(format!("Port {port} is already in use")));
         }
-        prepare(kind, settings, layout).await?;
+        prepare(app, kind, settings, layout).await?;
 
         let log = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(layout.logs().join(format!("{}.log", kind.id())))
+            .open(layout.logs().join(format!("{}-output.log", kind.id())))
             .await?;
         let log = Arc::new(Mutex::new(log));
 
@@ -346,6 +374,11 @@ impl Supervisor {
         pipe_output(app.clone(), kind, child.stderr.take(), log);
 
         let (stop_tx, stop_rx) = oneshot::channel();
+        logs::system(
+            app,
+            Level::Info,
+            format!("{} started (PID {}, port {port})", kind.label(), child.id().unwrap_or_default()),
+        );
         self.running.lock().await.insert(
             kind,
             Handle {
@@ -397,6 +430,10 @@ impl Supervisor {
             }
             drop(group);
             running.lock().await.remove(&kind);
+            match &message {
+                Some(m) => logs::system(&app, Level::Error, m.clone()),
+                None => logs::system(&app, Level::Info, format!("{} stopped", kind.label())),
+            }
             emit_status(&app, kind, state, message);
         });
 
@@ -410,6 +447,7 @@ impl Supervisor {
                 handle.state = ServiceState::Stopping;
                 let _ = tx.send(());
                 emit_status(app, kind, ServiceState::Stopping, None);
+                logs::system(app, Level::Info, format!("Stopping {}", kind.label()));
             }
         }
     }

@@ -37,6 +37,16 @@ export function parseLog(raw: RawLogLine, received = new Date()): LogEntry {
   const line = raw.line;
   let m: RegExpMatchArray | null;
 
+  // lampRabit system log: [2026-10-24 18:11:14] info: Apache started
+  if ((m = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\] (info|warn|error): (.*)$/))) {
+    return {
+      ...base,
+      time: validDate(new Date(`${m[1]}T${m[2]}`)) ?? received,
+      level: m[3] as Level,
+      message: m[4],
+    };
+  }
+
   // Apache access: 127.0.0.1 - - [24/Oct/2026:17:56:01 +0530] "GET / HTTP/1.1" 200 1234
   if (raw.stream === "access" && (m = line.match(/\[(\d{2})\/(\w{3})\/(\d{4}):(\d{2}:\d{2}:\d{2}) ([+-]\d{4})\]/))) {
     const status = Number(line.match(/" (\d{3}) /)?.[1]);

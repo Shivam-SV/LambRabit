@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play, Search, Trash2 } from "lucide-react";
 import clsx from "clsx";
-import type { LogService } from "../lib/api";
+import { api, type LogService } from "../lib/api";
 import type { Level, LogEntry } from "../lib/logparse";
 import { useAppStore } from "../lib/store";
 import { Button, PageHeader, Switch } from "../components/ui";
@@ -11,12 +11,14 @@ const services: { id: LogService | "all"; label: string }[] = [
   { id: "apache", label: "Apache" },
   { id: "php", label: "PHP" },
   { id: "mariadb", label: "MariaDB" },
+  { id: "system", label: "System" },
 ];
 
 const badge: Record<LogService, { label: string; className: string }> = {
   apache: { label: "Apache", className: "bg-rose-500/20 text-rose-300" },
   php: { label: "PHP", className: "bg-indigo-500/25 text-indigo-300" },
   mariadb: { label: "MariaDB", className: "bg-amber-500/20 text-amber-300" },
+  system: { label: "System", className: "bg-emerald-500/15 text-emerald-300" },
 };
 
 const levels: Record<Level, { dot: string; text: string }> = {
@@ -35,7 +37,32 @@ const stamp = (d: Date) =>
 export default function Logs() {
   const logs = useAppStore((s) => s.logs);
   const clearLogs = useAppStore((s) => s.clearLogs);
+  const loadHistory = useAppStore((s) => s.loadHistory);
+  const notify = useAppStore((s) => s.notify);
   const [service, setService] = useState<LogService | "all">("all");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Always show what is on disk, including earlier runs.
+  useEffect(() => {
+    api
+      .logHistory()
+      .then(loadHistory)
+      .catch((e) => notify("error", String(e)))
+      .finally(() => setLoading(false));
+  }, [loadHistory, notify]);
+
+  const clearAll = async () => {
+    setConfirmClear(false);
+    setFrozen(null);
+    clearLogs();
+    try {
+      await api.clearLogs();
+    } catch (e) {
+      notify("error", String(e));
+    }
+    loadHistory(await api.logHistory());
+  };
   const [query, setQuery] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   /** When paused, the view is frozen at this many lines. */
@@ -103,15 +130,21 @@ export default function Logs() {
                 <Pause size={14} /> Pause
               </button>
             </div>
-            <Button
-              className="h-10 rounded-xl"
-              onClick={() => {
-                clearLogs();
-                setFrozen(null);
-              }}
-            >
-              <Trash2 size={15} /> Clear logs
-            </Button>
+            {confirmClear ? (
+              <div className="flex items-center gap-2 rounded-xl border border-danger/30 bg-danger-soft px-2 py-1">
+                <span className="pl-1 text-sm text-danger-text">Empty all log files?</span>
+                <Button size="sm" variant="danger" onClick={clearAll}>
+                  Clear
+                </Button>
+                <Button size="sm" onClick={() => setConfirmClear(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button className="h-10 rounded-xl" onClick={() => setConfirmClear(true)}>
+                <Trash2 size={15} /> Clear logs
+              </Button>
+            )}
           </>
         }
       />
@@ -120,13 +153,13 @@ export default function Logs() {
         <div ref={scroller} className="selectable h-[calc(100vh-21rem)] min-h-64 overflow-auto px-5 py-4 font-mono text-[13px] leading-7">
           {visible.length === 0 ? (
             <div className="flex h-full items-center justify-center font-sans text-sm text-slate-500">
-              {logs.length === 0 ? "No log output yet. Start a service to see its logs here." : "No lines match your filter."}
+              {loading ? "Loading logs…" : logs.length === 0 ? "No log output yet. Start a service to see its logs here." : "No lines match your filter."}
             </div>
           ) : (
             <table className="w-full border-separate border-spacing-0">
               <tbody>
                 {visible.map((l) => (
-                  <tr key={l.id} className="align-top hover:bg-white/[0.03]">
+                  <tr key={l.id} className="align-top hover:bg-white/3">
                     <td className="pr-4 whitespace-nowrap text-slate-500">[{stamp(l.time)}]</td>
                     <td className="pr-4">
                       <span className={clsx("rounded-md px-2 py-0.5 text-xs", badge[l.service].className)}>

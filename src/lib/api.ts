@@ -50,9 +50,29 @@ export interface ServiceInfo {
 
 export interface Site {
   name: string;
+  domain: string;
   path: string;
+  /** Directory Apache serves: the project's public/ folder when it has one. */
+  docroot: string;
+  ssl: boolean;
   url: string;
   modified: number;
+}
+
+export interface SitesInfo {
+  sites: Site[];
+  tld: string;
+  needsApply: boolean;
+  hostsOk: boolean;
+  manageHosts: boolean;
+  /** null while no site uses HTTPS. */
+  caTrusted: boolean | null;
+  caPath: string;
+}
+
+export interface LogHistory {
+  lines: RawLogLine[];
+  cursor: number;
 }
 
 export interface StatusEvent {
@@ -61,7 +81,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "php" | "mariadb";
+export type LogService = "apache" | "php" | "mariadb" | "system";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -76,6 +96,9 @@ export interface Settings {
   tld: string;
   ports: { http: number; https: number; mysql: number; phpFpm: number };
   versions: { apache: string | null; php: string | null; mariadb: string | null };
+  httpsByDefault: boolean;
+  manageHosts: boolean;
+  sites: Record<string, { ssl: boolean | null }>;
 }
 
 export interface EnvPaths {
@@ -83,6 +106,7 @@ export interface EnvPaths {
   www: string;
   logs: string;
   settingsFile: string;
+  os: "windows" | "macos" | "linux";
 }
 
 export const api = {
@@ -93,12 +117,16 @@ export const api = {
   startService: (kind: ServiceKind) => invoke<void>("start_service", { kind }),
   stopService: (kind: ServiceKind) => invoke<void>("stop_service", { kind }),
   restartService: (kind: ServiceKind) => invoke<void>("restart_service", { kind }),
-  listSites: () => invoke<Site[]>("list_sites"),
+  listSites: () => invoke<SitesInfo>("list_sites"),
+  applySites: () => invoke<void>("apply_sites"),
+  setSiteSsl: (name: string, ssl: boolean) => invoke<void>("set_site_ssl", { name, ssl }),
+  trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),
   startAll: () => invoke<string[]>("start_all"),
   stopAll: () => invoke<void>("stop_all"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
-  recentLogs: () => invoke<RawLogLine[]>("recent_logs"),
+  logHistory: () => invoke<LogHistory>("log_history"),
+  clearLogs: () => invoke<void>("clear_logs"),
   runtimeCatalog: (runtime: Runtime) => invoke<Release[]>("runtime_catalog", { runtime }),
   installedRuntimes: () => invoke<InstalledRuntime[]>("installed_runtimes"),
   installRuntime: (release: Release) => invoke<void>("install_runtime", { release }),

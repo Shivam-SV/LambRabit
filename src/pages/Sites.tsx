@@ -1,30 +1,119 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, FolderOpen, Globe, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  FolderOpen,
+  Globe,
+  Lock,
+  LockOpen,
+  RefreshCw,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 import clsx from "clsx";
-import { api } from "../lib/api";
+import type { ReactNode } from "react";
+import { api, type Site } from "../lib/api";
 import { useAppStore } from "../lib/store";
-import { Button, Card, PageHeader } from "../components/ui";
+import { Button, Card, PageHeader, Switch } from "../components/ui";
 
 export default function Sites() {
+  const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
-  const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 15_000 });
+  const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 10_000 });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["sites"] });
+
+  const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError });
+  const trust = useMutation({
+    mutationFn: api.trustCa,
+    onSuccess: () => {
+      notify("info", "Certificate trusted. Restart your browser if it still shows a warning.");
+      refresh();
+    },
+    onError,
+  });
+
+  const data = info.data;
+  const os = paths.data?.os;
 
   return (
     <>
       <PageHeader
         title="Sites"
-        subtitle="Every folder in www is served as a site."
+        subtitle={
+          <>
+            Every folder in <span className="font-mono">www</span> is served at{" "}
+            <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, including sub-domains.
+          </>
+        }
         actions={
-          <Button onClick={() => sites.refetch()} disabled={sites.isFetching} aria-label="Refresh sites">
-            <RefreshCw size={15} className={clsx(sites.isFetching && "animate-spin")} />
-          </Button>
+          <>
+            <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
+              <FolderOpen size={16} /> Open www
+            </Button>
+            <Button onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites">
+              <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
+            </Button>
+          </>
         }
       />
 
-      {sites.data?.length === 0 ? (
+      <div className="mb-5 space-y-3">
+        {data?.needsApply && (
+          <Banner
+            icon={RefreshCw}
+            tone="info"
+            text="Your sites changed since Apache started. Apply to update domains, certificates and the hosts file."
+            action={
+              <Button variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending}>
+                {apply.isPending ? "Applying…" : "Apply changes"}
+              </Button>
+            }
+          />
+        )}
+        {data && !data.hostsOk && !data.needsApply && data.sites.length > 0 && (
+          <Banner
+            icon={AlertTriangle}
+            tone="warn"
+            text={
+              data.manageHosts
+                ? "Some domains are not in the hosts file yet. This happens automatically when Apache starts, or update it now (needs administrator approval)."
+                : "Some domains are not in the hosts file, and automatic updates are off in Settings."
+            }
+            action={
+              <Button onClick={() => apply.mutate()} disabled={apply.isPending}>
+                Update hosts file
+              </Button>
+            }
+          />
+        )}
+        {data?.caTrusted === false && (
+          <Banner
+            icon={ShieldCheck}
+            tone="warn"
+            text={
+              <>
+                Browsers will warn on HTTPS sites until you trust lampRabit's local certificate authority.
+                {os === "windows" && " Windows asks you to confirm once."}{" "}
+                <span className="text-muted">Firefox uses its own certificate list; enable "security.enterprise_roots.enabled" there.</span>
+              </>
+            }
+            action={
+              os === "linux" ? (
+                <Button onClick={() => openPath(data.caPath).catch(onError)}>Show certificate</Button>
+              ) : (
+                <Button variant="primary" onClick={() => trust.mutate()} disabled={trust.isPending}>
+                  <ShieldCheck size={16} /> Trust certificate
+                </Button>
+              )
+            }
+          />
+        )}
+      </div>
+
+      {data?.sites.length === 0 ? (
         <Card className="flex flex-col items-center gap-3 px-6 py-14 text-center">
           <div className="flex size-14 items-center justify-center rounded-full bg-accent-soft text-accent-text">
             <Globe size={26} />
@@ -34,42 +123,94 @@ export default function Sites() {
             Create a folder inside <span className="font-mono">www</span> and put an{" "}
             <span className="font-mono">index.php</span> in it. It shows up here automatically.
           </p>
-          <Button variant="primary" onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
-            <FolderOpen size={16} /> Open www
-          </Button>
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {sites.data?.map((site) => (
-            <Card key={site.path} className="flex flex-col gap-4 p-5">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-text">
-                  <Globe size={20} />
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate font-semibold">{site.name}</div>
-                  <div className="selectable truncate font-mono text-xs text-muted">{site.url}</div>
-                </div>
-              </div>
-              <div className="selectable truncate text-sm text-muted" title={site.path}>
-                {site.path}
-              </div>
-              <div className="mt-auto flex gap-2">
-                <Button variant="soft" className="flex-1" onClick={() => openUrl(site.url).catch(onError)}>
-                  <ExternalLink size={15} /> Open
-                </Button>
-                <Button onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
-                  <FolderOpen size={15} />
-                </Button>
-              </div>
-            </Card>
-          ))}
+          {data?.sites.map((site) => <SiteCard key={site.path} site={site} />)}
         </div>
       )}
-
-      <p className="mt-6 text-sm text-muted">
-        Pretty domains like <span className="font-mono">myapp.test</span> with HTTPS are coming next.
-      </p>
     </>
+  );
+}
+
+function Banner({
+  icon: Icon,
+  tone,
+  text,
+  action,
+}: {
+  icon: LucideIcon;
+  tone: "info" | "warn";
+  text: ReactNode;
+  action: ReactNode;
+}) {
+  return (
+    <div
+      className={clsx(
+        "flex flex-wrap items-center gap-4 rounded-2xl border px-5 py-3.5",
+        tone === "info" ? "border-accent/25 bg-accent-soft" : "border-warn/30 bg-warn/10",
+      )}
+    >
+      <Icon size={20} className={tone === "info" ? "text-accent-text" : "text-warn"} />
+      <p className="min-w-60 flex-1 text-sm">{text}</p>
+      {action}
+    </div>
+  );
+}
+
+function SiteCard({ site }: { site: Site }) {
+  const queryClient = useQueryClient();
+  const notify = useAppStore((s) => s.notify);
+  const onError = (e: unknown) => notify("error", String(e));
+  const toggleSsl = useMutation({
+    mutationFn: (ssl: boolean) => api.setSiteSsl(site.name, ssl),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sites"] });
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError,
+  });
+  const servesPublic = site.docroot !== site.path;
+
+  return (
+    <Card className="flex flex-col gap-4 p-5">
+      <div className="flex items-center gap-3">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-text">
+          <Globe size={20} />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-semibold">{site.domain}</div>
+          <div className="selectable flex items-center gap-1 truncate font-mono text-xs text-muted">
+            {site.ssl ? <Lock size={11} className="text-accent-text" /> : <LockOpen size={11} />}
+            {site.url}
+          </div>
+        </div>
+      </div>
+
+      <div className="text-sm text-muted">
+        <div className="selectable truncate" title={site.docroot}>
+          {site.path}
+        </div>
+        {servesPublic && <div className="mt-0.5 text-xs">Serving the public/ folder</div>}
+      </div>
+
+      <div className="flex items-center justify-between rounded-xl bg-surface-2 px-3 py-2">
+        <span className="text-sm font-medium">HTTPS</span>
+        <Switch
+          checked={site.ssl}
+          onChange={(v) => toggleSsl.mutate(v)}
+          label={`HTTPS for ${site.domain}`}
+        />
+      </div>
+
+      <div className="mt-auto flex gap-2">
+        <Button variant="soft" className="flex-1" onClick={() => openUrl(site.url).catch(onError)}>
+          <ExternalLink size={15} /> Open
+        </Button>
+        <Button onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
+          <FolderOpen size={15} />
+        </Button>
+      </div>
+    </Card>
   );
 }

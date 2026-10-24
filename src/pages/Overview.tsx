@@ -49,7 +49,7 @@ export default function Overview() {
   const greeting = greetings.find((g) => hour < g.until)!;
   const installed = services.data?.filter((s) => s.installed) ?? [];
   const running = installed.filter((s) => s.state === "running");
-  const siteCount = sites.data?.length ?? 0;
+  const siteCount = sites.data?.sites.length ?? 0;
 
   const status =
     installed.length === 0
@@ -110,7 +110,7 @@ export default function Overview() {
       </section>
 
       <section className="grid gap-5 md:grid-cols-2">
-        <RecentSites sites={sites.data ?? []} />
+        <RecentSites sites={sites.data?.sites ?? []} />
         <RecentActivity />
       </section>
     </div>
@@ -256,11 +256,11 @@ function RecentSites({ sites }: { sites: Site[] }) {
                 <Globe size={20} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{site.name}</div>
+                <div className="truncate font-semibold">{site.domain}</div>
                 <div className="selectable truncate text-sm text-muted">{site.path}</div>
               </div>
               <button
-                aria-label={`Open ${site.name} in browser`}
+                aria-label={`Open ${site.domain} in browser`}
                 onClick={() => openUrl(site.url).catch(onError)}
                 className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
               >

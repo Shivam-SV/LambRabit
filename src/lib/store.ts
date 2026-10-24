@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { InstallProgress, RawLogLine } from "./api";
+import type { InstallProgress, LogHistory, RawLogLine } from "./api";
 import { parseLog, type LogEntry } from "./logparse";
 
 const MAX_LOG_LINES = 2000;
@@ -33,8 +33,8 @@ interface AppStore {
   installs: Record<string, InstallProgress>;
   setInstall: (p: InstallProgress) => void;
   pushLog: (line: RawLogLine) => void;
-  /** Merges history fetched from the backend, skipping lines already received live. */
-  mergeLogs: (lines: RawLogLine[]) => void;
+  /** Replaces the view with history read from the log files on disk. */
+  loadHistory: (history: LogHistory) => void;
   clearLogs: () => void;
   record: (text: string, source: string, tone: Activity["tone"]) => void;
   notify: (tone: Notice["tone"], text: string) => void;
@@ -42,8 +42,8 @@ interface AppStore {
 }
 
 let nextId = 1;
-/** Log lines with an id at or below this were cleared by the user. */
-let clearedThrough = 0;
+/** Live lines at or below this id are already part of the loaded history. */
+let logCursor = 0;
 
 export const useAppStore = create<AppStore>((set) => ({
   page: "overview",
@@ -60,20 +60,18 @@ export const useAppStore = create<AppStore>((set) => ({
       else installs[key] = p;
       return { installs };
     }),
-  pushLog: (line) => set((s) => ({ logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)] })),
-  mergeLogs: (lines) =>
+  pushLog: (line) =>
+    set((s) => (line.id <= logCursor ? s : { logs: [...s.logs.slice(-(MAX_LOG_LINES - 1)), parseLog(line)] })),
+  loadHistory: ({ lines, cursor }) =>
     set((s) => {
-      const seen = new Set(s.logs.map((l) => l.id));
-      const fresh = lines.filter((l) => l.id > clearedThrough && !seen.has(l.id)).map((l) => parseLog(l));
-      // History arrives grouped by file; order everything by the time in the line.
-      const merged = [...fresh, ...s.logs].sort((a, b) => a.time.getTime() - b.time.getTime());
+      logCursor = cursor;
+      // History ids are 0; give them unique negative ids so they never collide with live ones.
+      const history = lines.map((l, i) => parseLog({ ...l, id: -(i + 1) }));
+      const live = s.logs.filter((l) => l.id > cursor);
+      const merged = [...history, ...live].sort((a, b) => a.time.getTime() - b.time.getTime());
       return { logs: merged.slice(-MAX_LOG_LINES) };
     }),
-  clearLogs: () =>
-    set((s) => {
-      clearedThrough = Math.max(clearedThrough, ...s.logs.map((l) => l.id));
-      return { logs: [] };
-    }),
+  clearLogs: () => set({ logs: [] }),
   record: (text, source, tone) =>
     set((s) => ({
       activity: [{ id: nextId++, at: new Date(), text, source, tone }, ...s.activity].slice(0, MAX_ACTIVITY),

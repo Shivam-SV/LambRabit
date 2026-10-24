@@ -25,7 +25,8 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **1. Service supervisor**: start/stop/status, port-conflict check, log streaming, cleanup on exit
 - [x] **2. Runtime manager**: manifest, download with progress, verify, extract, switch active version
 - [x] **3. Config templating**: httpd.conf / php.ini / my.ini / php-fpm.conf from templates; MariaDB data-dir init
-- [ ] **4. Sites**: `www/foo` → `foo.test`, hosts-file editing via an elevated helper, local CA + HTTPS
-- [ ] **5. Comfort**: tray menu, autostart, "open terminal" with PATH, open in editor, VC++ runtime check
-- [ ] **6. Extras**: quick-create Laravel/WordPress, Nginx, Redis, Mailpit, Adminer, Node
-- [ ] **7. Release**: installers (NSIS/MSI, dmg, AppImage/deb), auto-updater, CI
+- [x] **4. Sites**: `www/foo` → `foo.test` (+ sub-domains, `public/` detection), hosts file kept in sync when Apache starts (one elevation prompt, managed block only), local CA + per-site HTTPS with a global default, System log stream persisted to `logs/lampRabit.log`, log history read from disk with clear, OS-specific settings hidden elsewhere
+- [ ] **5. Developer utilities**: Adminer / phpMyAdmin at `adminer.test`, Mailpit as a managed service with PHP `mail()` routed to it
+- [ ] **6. Comfort**: tray menu, autostart, "open terminal" with PATH, open in editor, VC++ runtime check, MariaDB data dir per major version
+- [ ] **7. Extras**: quick-create Laravel/WordPress, Nginx, Redis, Node
+- [ ] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), auto-updater, CI

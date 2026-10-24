@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +16,18 @@ pub struct Settings {
     pub tld: String,
     pub ports: Ports,
     pub versions: Versions,
+    /// HTTPS for sites that have no setting of their own.
+    pub https_by_default: bool,
+    /// Keep the system hosts file in sync with the site list when Apache starts.
+    pub manage_hosts: bool,
+    /// Per-site overrides keyed by folder name.
+    pub sites: BTreeMap<String, SiteSettings>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SiteSettings {
+    pub ssl: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +56,9 @@ impl Default for Settings {
             tld: "test".into(),
             ports: Ports::default(),
             versions: Versions::default(),
+            https_by_default: true,
+            manage_hosts: true,
+            sites: BTreeMap::new(),
         }
     }
 }

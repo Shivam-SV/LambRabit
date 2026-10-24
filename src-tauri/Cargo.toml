@@ -31,6 +31,10 @@ sha2 = "0.10"
 zip = "2"
 flate2 = "1"
 tar = "0.4"
+rcgen = "0.13"
+time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
+sha1 = "0.10"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

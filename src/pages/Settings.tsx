@@ -2,23 +2,32 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CheckCircle2, FolderOpen, Layers, Monitor, Moon, Plug, Save, Settings2, Sun } from "lucide-react";
-import { api, runtimeLabels, type Runtime, type Settings as SettingsT } from "../lib/api";
+import { api, runtimeLabels, type EnvPaths, type Runtime, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
 import { runtimeTiles } from "../components/runtimes";
-import { Button, IconTile, PageHeader, SectionCard, Segmented, inputClass } from "../components/ui";
+import { Button, IconTile, PageHeader, SectionCard, Segmented, Switch, inputClass } from "../components/ui";
 
-const portFields = [
+type Os = EnvPaths["os"];
+
+/** `only` limits a field to the platforms where it does anything. */
+const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; only?: Os[] }[] = [
   { key: "http", label: "HTTP", hint: "Apache HTTP port." },
   { key: "https", label: "HTTPS", hint: "Apache HTTPS port (SSL)." },
   { key: "mysql", label: "MariaDB", hint: "MySQL-compatible database port." },
-  { key: "phpFpm", label: "PHP-FPM (macOS/Linux)", hint: "PHP FastCGI Process Manager port." },
-] as const;
+  { key: "phpFpm", label: "PHP-FPM", hint: "PHP FastCGI Process Manager port.", only: ["macos", "linux"] },
+];
 
-const runtimeHints: Record<Runtime, string> = {
-  apache: "HTTP server (Apache Lounge builds)",
-  php: "Thread-safe builds from windows.php.net",
+const runtimeHints = (os: Os | undefined): Record<Runtime, string> => ({
+  apache: os === "windows" ? "HTTP server (Apache Lounge builds)" : "HTTP server",
+  php: os === "windows" ? "Thread-safe builds from windows.php.net" : "Runs as PHP-FPM",
   mariadb: "MySQL-compatible database server",
+});
+
+const hostsFile: Record<Os, string> = {
+  windows: String.raw`C:\Windows\System32\drivers\etc\hosts`,
+  macos: "/etc/hosts",
+  linux: "/etc/hosts",
 };
 
 type Versions = Record<Runtime, string | null>;
@@ -30,6 +39,7 @@ export default function Settings() {
   const { theme, setTheme } = useTheme();
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
+  const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
 
@@ -51,14 +61,17 @@ export default function Settings() {
   const dirty =
     !!draft &&
     !!settings.data &&
-    (JSON.stringify({ ...draft, versions: null }) !== JSON.stringify({ ...settings.data, versions: null }) ||
+    (JSON.stringify({ ...draft, versions: null, sites: null }) !==
+      JSON.stringify({ ...settings.data, versions: null, sites: null }) ||
       JSON.stringify(versions) !== JSON.stringify(activeVersions));
 
   const save = useMutation({
     mutationFn: async () => {
       if (!draft || !settings.data) return;
-      // Versions are switched separately so running services restart onto them.
-      await api.saveSettings({ ...draft, versions: settings.data.versions });
+      // Versions are switched separately so running services restart onto them, and
+      // per-site options are owned by the Sites page, so both come from the latest copy.
+      const latest = await api.getSettings();
+      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites });
       for (const runtime of Object.keys(versions ?? {}) as Runtime[]) {
         const version = versions?.[runtime];
         if (version && version !== activeVersions?.[runtime]) await api.setActiveVersion(runtime, version);
@@ -125,12 +138,30 @@ export default function Settings() {
                 onChange={(e) => setDraft({ ...draft, tld: e.target.value.replace(/^\.+/, "") })}
               />
             </Field>
+            <Toggle
+              label="HTTPS by default"
+              hint="Sites use HTTPS with a locally trusted certificate unless you turn it off for a site."
+              checked={draft.httpsByDefault}
+              onChange={(v) => setDraft({ ...draft, httpsByDefault: v })}
+            />
+            {draft.tld === "localhost" ? (
+              <p className="text-xs text-muted">
+                .localhost domains resolve on their own, so the hosts file is left untouched.
+              </p>
+            ) : (
+              <Toggle
+                label="Update hosts file automatically"
+                hint={`Adds your sites to ${os ? hostsFile[os] : "the hosts file"} when Apache starts. Your system asks for administrator approval when the list changes.`}
+                checked={draft.manageHosts}
+                onChange={(v) => setDraft({ ...draft, manageHosts: v })}
+              />
+            )}
           </div>
         </SectionCard>
 
         <SectionCard icon={<Plug size={22} />} title="Ports" subtitle="Network ports used by local services.">
           <div className="grid gap-x-5 gap-y-5 sm:grid-cols-2">
-            {portFields.map(({ key, label, hint }) => (
+            {portFields.filter((f) => !f.only || (os && f.only.includes(os))).map(({ key, label, hint }) => (
               <Field key={key} label={label} hint={hint}>
                 <input
                   type="number"
@@ -174,7 +205,7 @@ export default function Settings() {
                         Not installed. Install from Services
                       </button>
                     )}
-                    <p className="mt-1 text-xs text-muted">{runtimeHints[runtime]}</p>
+                    <p className="mt-1 text-xs text-muted">{runtimeHints(os)[runtime]}</p>
                   </div>
                 </div>
               );
@@ -209,5 +240,27 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint && <span className="mt-1.5 block text-xs text-muted">{hint}</span>}
     </label>
+  );
+}
+
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <div className="text-sm font-semibold">{label}</div>
+        <div className="mt-0.5 text-xs text-muted">{hint}</div>
+      </div>
+      <Switch checked={checked} onChange={onChange} label={label} />
+    </div>
   );
 }

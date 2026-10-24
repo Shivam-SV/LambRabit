@@ -25,7 +25,7 @@ import { Button } from "./components/ui";
 
 function useBackendEvents() {
   const queryClient = useQueryClient();
-  const { pushLog, mergeLogs, notify, setInstall, record } = useAppStore.getState();
+  const { pushLog, loadHistory, notify, setInstall, record } = useAppStore.getState();
 
   useEffect(() => {
     const unlisten = [
@@ -50,9 +50,9 @@ function useBackendEvents() {
       }),
     ];
     // Subscribe first, then backfill, so no line falls in between.
-    Promise.all(unlisten).then(() => api.recentLogs().then(mergeLogs)).catch(() => {});
+    Promise.all(unlisten).then(() => api.logHistory().then(loadHistory)).catch(() => {});
     return () => unlisten.forEach((p) => p.then((off) => off()));
-  }, [queryClient, pushLog, mergeLogs, notify, setInstall, record]);
+  }, [queryClient, pushLog, loadHistory, notify, setInstall, record]);
 }
 
 function AppHeader({ showActions }: { showActions: boolean }) {

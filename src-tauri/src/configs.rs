@@ -95,6 +95,7 @@ DirectoryIndex index.php index.html index.htm
     Require all denied
 </Files>
 
+PidFile "{pidfile}"
 ErrorLog "{logs}/apache-error.log"
 LogLevel warn
 LogFormat "%h %l %u %t \"%r\" %>s %b \"%{{Referer}}i\" \"%{{User-Agent}}i\"" combined
@@ -114,12 +115,22 @@ EnableSendfile off
 EnableMMAP off
 
 {php}
+# Virtual hosts for the folders in www/
+Include "{vhosts}"
 IncludeOptional "{sites}/*.conf"
 "#,
         sites = slash(&etc.join("sites")),
+        vhosts = slash(&crate::sites::vhosts_path(layout)),
+        pidfile = slash(&apache_pid_file(layout)),
     );
     std::fs::write(etc.join("httpd.conf"), conf)?;
     Ok(())
+}
+
+/// lampRabit stops Apache by ending its process tree, so a stale PID file is expected and
+/// removed before each start rather than letting Apache warn about an unclean shutdown.
+pub fn apache_pid_file(layout: &Layout) -> PathBuf {
+    layout.tmp().join("httpd.pid")
 }
 
 pub fn write_php(settings: &Settings, layout: &Layout) -> Result<()> {

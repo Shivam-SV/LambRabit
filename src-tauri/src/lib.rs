@@ -6,6 +6,8 @@ mod logs;
 mod procgroup;
 mod runtimes;
 mod services;
+mod sites;
+mod ssl;
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -25,6 +27,8 @@ struct AppState {
     supervisor: Supervisor,
     http: reqwest::Client,
     installing: Mutex<HashSet<(Runtime, String)>>,
+    /// Cached result of the (slow) trust-store lookup; reset when trust changes.
+    ca_trusted: Mutex<Option<bool>>,
 }
 
 impl AppState {
@@ -79,6 +83,8 @@ struct EnvPaths {
     www: PathBuf,
     logs: PathBuf,
     settings_file: PathBuf,
+    /// "windows", "macos" or "linux", so the UI can hide OS-specific options.
+    os: &'static str,
 }
 
 #[derive(Serialize)]
@@ -95,11 +101,15 @@ async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
 }
 
 #[tauri::command]
-async fn save_settings(state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
-    Layout::new(&settings.root_dir).ensure()?;
+async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
+    let layout = Layout::new(&settings.root_dir);
+    layout.ensure()?;
     reconcile_versions(&mut settings);
     settings.save(&state.settings_path)?;
     *state.settings.write().await = settings.clone();
+    *state.ca_trusted.lock().await = None;
+    logs::set_system_file(&app, layout.logs().join("lampRabit.log"));
+    logs::system(&app, logs::Level::Info, "Settings saved");
     Ok(settings)
 }
 
@@ -111,6 +121,7 @@ async fn env_paths(state: State<'_, AppState>) -> Result<EnvPaths> {
         www: layout.www(),
         logs: layout.logs(),
         settings_file: state.settings_path.clone(),
+        os: std::env::consts::OS,
     })
 }
 
@@ -158,6 +169,7 @@ async fn stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
 
 #[tauri::command]
 async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
+    logs::system(&app, logs::Level::Info, format!("Restarting {}", kind.label()));
     state.supervisor.stop(&app, kind).await;
     state.supervisor.wait_stopped(kind).await;
     let (settings, layout) = state.snapshot().await;
@@ -166,43 +178,97 @@ async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: Servi
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Site {
-    name: String,
-    path: PathBuf,
-    url: String,
-    /// Unix time in milliseconds of the folder's last modification.
-    modified: u64,
+struct SitesInfo {
+    sites: Vec<sites::Site>,
+    tld: String,
+    /// Apache is running with a different site list than what is in www/ now.
+    needs_apply: bool,
+    /// The hosts file is in sync, or does not need to be (`.localhost`, or management off).
+    hosts_ok: bool,
+    manage_hosts: bool,
+    /// None while no site uses HTTPS.
+    ca_trusted: Option<bool>,
+    ca_path: PathBuf,
 }
 
 /// Every folder in www/ is a site, most recently modified first.
 #[tauri::command]
-async fn list_sites(state: State<'_, AppState>) -> Result<Vec<Site>> {
+async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
     let (settings, layout) = state.snapshot().await;
-    let port = match settings.ports.http {
-        80 => String::new(),
-        p => format!(":{p}"),
+    let sites = sites::scan(&settings, &layout);
+    let needs_apply =
+        state.supervisor.is_running(ServiceKind::Apache).await && sites::vhosts_stale(&settings, &layout, &sites);
+    let hosts_ok = !sites::needs_hosts_file(&settings) || sites::hosts_in_sync(&sites);
+    let ca_trusted = if sites.iter().any(|s| s.ssl) && ssl::ca_thumbprint(&layout).is_some() {
+        let mut cached = state.ca_trusted.lock().await;
+        if cached.is_none() {
+            *cached = Some(ssl::ca_trusted(&layout).await);
+        }
+        *cached
+    } else if sites.iter().any(|s| s.ssl) {
+        Some(false)
+    } else {
+        None
     };
-    let mut sites: Vec<Site> = std::fs::read_dir(layout.www())?
-        .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            if name.starts_with('.') {
-                return None;
-            }
-            let modified = e
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_millis() as u64);
-            // Served from the document root until per-site virtual hosts land (phase 4).
-            let url = format!("http://localhost{port}/{name}/");
-            Some(Site { path: e.path(), name, url, modified })
-        })
-        .collect();
-    sites.sort_by(|a, b| b.modified.cmp(&a.modified));
-    Ok(sites)
+    Ok(SitesInfo {
+        sites,
+        tld: settings.tld.clone(),
+        needs_apply,
+        hosts_ok,
+        manage_hosts: settings.manage_hosts,
+        ca_trusted,
+        ca_path: ssl::ca_cert_path(&layout),
+    })
+}
+
+/// Makes Apache and the hosts file match www/: restarts Apache if it is running
+/// (which regenerates vhosts and certificates), otherwise just syncs the hosts file.
+#[tauri::command]
+async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    logs::system(&app, logs::Level::Info, "Applying site changes");
+    if state.supervisor.is_running(ServiceKind::Apache).await {
+        state.supervisor.stop(&app, ServiceKind::Apache).await;
+        state.supervisor.wait_stopped(ServiceKind::Apache).await;
+        state.supervisor.start(&app, ServiceKind::Apache, &settings, &layout).await
+    } else {
+        let sites = sites::scan(&settings, &layout);
+        if sites::needs_hosts_file(&settings) && !sites::hosts_in_sync(&sites) {
+            sites::update_hosts(&layout, &sites).await?;
+            logs::system(&app, logs::Level::Info, "Hosts file updated");
+        }
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn set_site_ssl(app: AppHandle, state: State<'_, AppState>, name: String, ssl: bool) -> Result<()> {
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().ssl = Some(ssl)).await?;
+    logs::system(&app, logs::Level::Info, format!("HTTPS {} for {name}", if ssl { "enabled" } else { "disabled" }));
+    if state.supervisor.is_running(ServiceKind::Apache).await {
+        let (settings, layout) = state.snapshot().await;
+        state.supervisor.stop(&app, ServiceKind::Apache).await;
+        state.supervisor.wait_stopped(ServiceKind::Apache).await;
+        state.supervisor.start(&app, ServiceKind::Apache, &settings, &layout).await?;
+    }
+    Ok(())
+}
+
+/// Adds the local CA to the user's trust store (the OS asks for confirmation).
+#[tauri::command]
+async fn trust_ca(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    *state.ca_trusted.lock().await = None;
+    match ssl::trust_ca(&layout).await {
+        Ok(()) => {
+            logs::system(&app, logs::Level::Info, "Local certificate authority trusted");
+            Ok(())
+        }
+        Err(e) => {
+            logs::system(&app, logs::Level::Warn, e.to_string());
+            Err(e)
+        }
+    }
 }
 
 /// Opens the MariaDB command-line client in a new terminal window.
@@ -228,8 +294,21 @@ async fn open_db_client(state: State<'_, AppState>) -> Result<()> {
 }
 
 #[tauri::command]
-fn recent_logs(app: AppHandle) -> Vec<logs::LogLine> {
-    logs::recent(&app)
+async fn log_history(app: AppHandle, state: State<'_, AppState>) -> Result<logs::History> {
+    let (_, layout) = state.snapshot().await;
+    Ok(logs::history(&app, &layout.logs()))
+}
+
+#[tauri::command]
+async fn clear_logs(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    let failed = logs::clear(&app, &layout.logs());
+    logs::system(&app, logs::Level::Info, "Logs cleared");
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::msg(format!("Could not clear {} (in use by a running service?)", failed.join(", "))))
+    }
 }
 
 #[tauri::command]
@@ -262,8 +341,14 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
         return Err(Error::msg(format!("{} {} is already being installed", release.runtime.id(), release.version)));
     }
     let (_, layout) = state.snapshot().await;
+    let label = format!("{} {}", release.runtime.id(), release.version);
+    logs::system(&app, logs::Level::Info, format!("Installing {label} from {}", release.url));
     let result = runtimes::install(&app, &state.http, &layout, &release).await;
     state.installing.lock().await.remove(&key);
+    match &result {
+        Ok(()) => logs::system(&app, logs::Level::Info, format!("Installed {label}")),
+        Err(e) => logs::system(&app, logs::Level::Error, format!("Installing {label} failed: {e}")),
+    }
     result?;
 
     // The first installed version of a runtime becomes the active one.
@@ -279,7 +364,7 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
 }
 
 #[tauri::command]
-async fn remove_runtime(state: State<'_, AppState>, runtime: Runtime, version: String) -> Result<()> {
+async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Runtime, version: String) -> Result<()> {
     let (mut settings, layout) = state.snapshot().await;
     if active_version(&mut settings, runtime).as_deref() == Some(version.as_str()) {
         for &kind in dependents(runtime) {
@@ -289,6 +374,7 @@ async fn remove_runtime(state: State<'_, AppState>, runtime: Runtime, version: S
         }
     }
     runtimes::remove(&layout, runtime, &version)?;
+    logs::system(&app, logs::Level::Info, format!("Removed {} {version}", runtime.id()));
     state.update_settings(reconcile_versions).await?;
     Ok(())
 }
@@ -317,6 +403,7 @@ async fn set_active_version(
         state.supervisor.wait_stopped(kind).await;
     }
 
+    logs::system(&app, logs::Level::Info, format!("Switching {} to {version}", runtime.id()));
     let settings = state.update_settings(|s| *active_version(s, runtime) = Some(version)).await?;
     let layout = Layout::new(&settings.root_dir);
     for kind in restart {
@@ -343,8 +430,14 @@ pub fn run() {
                 supervisor: Supervisor::default(),
                 http: runtimes::client(),
                 installing: Mutex::new(HashSet::new()),
+                ca_trusted: Mutex::new(None),
             });
             app.manage(logs::LogHub::default());
+            {
+                let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
+                logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
+            }
+            logs::system(app.handle(), logs::Level::Info, format!("lampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -367,9 +460,13 @@ pub fn run() {
             start_all,
             stop_all,
             check_port,
-            recent_logs,
+            log_history,
+            clear_logs,
             restart_service,
             list_sites,
+            apply_sites,
+            set_site_ssl,
+            trust_ca,
             open_db_client,
             runtime_catalog,
             installed_runtimes,
