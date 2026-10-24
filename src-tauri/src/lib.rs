@@ -6,6 +6,7 @@ mod layout;
 mod logs;
 mod php;
 mod procgroup;
+mod projects;
 mod runtimes;
 mod services;
 mod sites;
@@ -348,6 +349,57 @@ async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: Strin
         None => "the default server",
     }));
     restart_web_servers(&app, &state).await
+}
+
+/// Creates a project in www/ from a preset and returns its URL. Progress is streamed as
+/// `project-progress` events; a failed project is removed so it can be retried.
+#[tauri::command]
+async fn create_project(app: AppHandle, state: State<'_, AppState>, request: projects::NewProject) -> Result<String> {
+    let (_, layout) = state.snapshot().await;
+    projects::validate(&request, &layout)?;
+    let name = request.name.trim().to_string();
+    state
+        .update_settings(|s| {
+            let site = s.sites.entry(name.clone()).or_default();
+            site.php = request.php.clone();
+            site.server = request.server;
+            site.ssl = Some(request.ssl);
+        })
+        .await?;
+    let (settings, layout) = state.snapshot().await;
+    let url = sites::url_for(&settings, &name).ok_or_else(|| Error::msg("invalid project name"))?;
+    let ctx = projects::Ctx { app: &app, http: &state.http, settings: &settings, layout: &layout, name: &name };
+    logs::system(&app, logs::Level::Info, format!("Creating project {name} ({:?})", request.preset));
+
+    let result = async {
+        if let Some(db) = &request.database {
+            if !state.supervisor.is_running(ServiceKind::Mariadb).await {
+                ctx.step("Starting MariaDB");
+                state.supervisor.start(&app, ServiceKind::Mariadb, &settings, &layout).await?;
+            }
+            // The process is up before it accepts connections.
+            for _ in 0..30 {
+                if matches!(diagnose::probe_mysql(settings.ports.mysql).await, diagnose::Probe::Ok) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            projects::create_database(&ctx, db).await?;
+        }
+        projects::build(&ctx, &request, &url).await
+    }
+    .await;
+
+    if let Err(e) = result {
+        let _ = std::fs::remove_dir_all(layout.www().join(&name));
+        state.update_settings(|s| { s.sites.remove(&name); }).await?;
+        logs::system(&app, logs::Level::Error, format!("Creating project {name} failed: {e}"));
+        return Err(e);
+    }
+    ctx.step("Adding the site to the web server");
+    restart_web_servers(&app, &state).await?;
+    logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
+    Ok(url)
 }
 
 #[tauri::command]
@@ -828,6 +880,7 @@ pub fn run() {
             set_site_php,
             set_site_server,
             php_status,
+            create_project,
             trust_ca,
             open_db_client,
             runtime_catalog,

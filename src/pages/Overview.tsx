@@ -394,6 +394,7 @@ function PanelHeader({ title, onViewAll }: { title: string; onViewAll: () => voi
 
 function RecentSites({ sites }: { sites: Site[] }) {
   const navigate = useAppStore((s) => s.navigate);
+  const openNewProject = useAppStore((s) => s.setNewProjectOpen);
   const notify = useAppStore((s) => s.notify);
   const onError = (e: unknown) => notify("error", String(e));
 
@@ -404,6 +405,11 @@ function RecentSites({ sites }: { sites: Site[] }) {
         <div className="py-6 text-center text-sm text-muted">
           <Globe size={28} className="mx-auto mb-2 opacity-50" />
           No sites yet. Each folder you create in <span className="font-mono">www</span> becomes a site.
+          <div className="mt-3">
+            <Button size="sm" variant="primary" onClick={() => openNewProject(true)}>
+              New project
+            </Button>
+          </div>
         </div>
       ) : (
         <ul className="divide-y divide-line">

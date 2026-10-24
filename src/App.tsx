@@ -19,6 +19,7 @@ import Notices from "./components/Notices";
 import BottomNav from "./components/BottomNav";
 import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
+import NewProject from "./components/NewProject";
 
 function useBackendEvents() {
   const queryClient = useQueryClient();
@@ -76,6 +77,7 @@ export default function App() {
       <BottomNav />
       <Notices />
       <Diagnostics />
+      <NewProject />
     </div>
   );
 }

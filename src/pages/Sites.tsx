@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ExternalLink,
   FolderOpen,
+  FolderPlus,
   Globe,
   Lock,
   LockOpen,
@@ -20,6 +21,7 @@ import { Button, Card, PageHeader, Switch } from "../components/ui";
 export default function Sites() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
+  const openNewProject = useAppStore((s) => s.setNewProjectOpen);
   const onError = (e: unknown) => notify("error", String(e));
   const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 10_000 });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
@@ -52,6 +54,9 @@ export default function Sites() {
           <>
             <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
               <FolderOpen size={16} /> Open www
+            </Button>
+            <Button variant="primary" onClick={() => openNewProject(true)}>
+              <FolderPlus size={16} /> New project
             </Button>
             <Button onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites">
               <RefreshCw size={15} className={clsx(info.isFetching && "animate-spin")} />
@@ -121,8 +126,11 @@ export default function Sites() {
           <div className="text-lg font-semibold">No sites yet</div>
           <p className="max-w-md text-muted">
             Create a folder inside <span className="font-mono">www</span> and put an{" "}
-            <span className="font-mono">index.php</span> in it. It shows up here automatically.
+            <span className="font-mono">index.php</span> in it, or start from a preset.
           </p>
+          <Button variant="primary" onClick={() => openNewProject(true)}>
+            <FolderPlus size={16} /> New project
+          </Button>
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

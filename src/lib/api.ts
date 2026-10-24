@@ -110,6 +110,23 @@ export interface Site {
   server: Server;
 }
 
+export type Preset = "blank" | "static" | "laravel" | "symfony" | "wordpress";
+
+export interface NewProject {
+  name: string;
+  preset: Preset;
+  php: string | null;
+  server: Server | null;
+  ssl: boolean;
+  database: string | null;
+}
+
+export interface ProjectProgress {
+  name: string;
+  step: string | null;
+  line: string | null;
+}
+
 export interface PoolStatus {
   version: string;
   port: number;
@@ -194,6 +211,7 @@ export const api = {
   setSitePhp: (name: string, version: string | null) => invoke<void>("set_site_php", { name, version }),
   setSiteServer: (name: string, server: Server | null) => invoke<void>("set_site_server", { name, server }),
   phpStatus: () => invoke<PoolStatus[]>("php_status"),
+  createProject: (request: NewProject) => invoke<string>("create_project", { request }),
   trustCa: () => invoke<void>("trust_ca"),
   openDbClient: () => invoke<void>("open_db_client"),
   startAll: () => invoke<string[]>("start_all"),

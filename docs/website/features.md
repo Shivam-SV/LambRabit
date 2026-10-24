@@ -88,9 +88,19 @@ When Apache starts, lampRabit adds your sites to the system hosts file, with one
 ### Apply changes (Available)
 Add a folder while the server is running and lampRabit offers to apply it: domains, certificates and the hosts file update together.
 
+### Create a project (Available)
+A guided "New project" dialog: name the project (with a live preview of its URL), pick a preset, choose the PHP version, web server and HTTPS, and optionally create a database. Progress and tool output stream live; if anything fails, nothing is left behind and you can try again.
+
+### Project presets (Available)
+- **Blank PHP** and **Static site**: ready instantly.
+- **Laravel**: the latest Laravel via Composer, with `.env` already pointing at the new MariaDB database and Mailpit, and migrations run.
+- **Symfony**: the Symfony skeleton with `DATABASE_URL` and `MAILER_DSN` set.
+- **WordPress**: the latest release (checksum-verified) with `wp-config.php` written, including fresh security keys; finish the install in the browser.
+
+Composer is downloaded and verified the first time it's needed.
+
 ### Coming soon
-- **Create a project**: a guided setup for a new project: name, folder, preset, database, HTTPS.
-- **Project presets**: ready-made setups for Blank PHP, Laravel, WordPress, Symfony and static sites, with the right PHP version and an optional database (and database user), Mailpit or Redis. Composer and WordPress are downloaded automatically.
+- **More presets**: dedicated database users and Redis for presets that use them.
 - **Share a site through Ngrok or Cloudflare**: expose a project on a public URL from its card, either automatically or by entering a port.
 
 ---

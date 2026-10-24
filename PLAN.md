@@ -46,7 +46,7 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
 ### 6.2 Web servers ✅
 - **Apache, Nginx or both**: Nginx from nginx.org (Windows zips; macOS/Linux via own builds or package manager). PHP for Nginx runs as FastCGI (`php-cgi` pool on Windows, `php-fpm` elsewhere). With both enabled, each site picks its server; the second server gets its own ports (default 8080/8443) and the UI blocks overlapping ports before start.
 
-### 6.3 Projects
+### 6.3 Projects ✅
 - **Create project** wizard: name → folder in `www/` → preset → options (database, HTTPS) → done, with live progress.
 - **Presets**: Blank PHP, Laravel, WordPress, Symfony, static. A preset can create a database and user, pick the PHP version, and enable tools (Mailpit, Redis). Needs Composer (downloaded `composer.phar`) and WP-CLI or the WordPress zip.
 - **Per-project PHP version** (decided: yes): PHP runs as FastCGI per installed version (`php-cgi` pool on Windows, `php-fpm` elsewhere) instead of a single `mod_php`; each site picks its version, default is the global active one. Shared with Nginx support in 6.2, so 6.2 lands first.

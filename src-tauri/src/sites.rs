@@ -76,6 +76,13 @@ fn site_server(settings: &Settings, name: &str) -> Server {
     }
 }
 
+/// The URL a folder in www/ will have, from the current settings.
+pub fn url_for(settings: &Settings, name: &str) -> Option<String> {
+    let domain = format!("{}.{}", label(name)?, settings.tld);
+    let ssl = settings.sites.get(name).and_then(|s| s.ssl).unwrap_or(settings.https_by_default);
+    Some(site_url(settings, site_server(settings, name), &domain, ssl))
+}
+
 /// Installed developer tools get their own domains: adminer.test, phpmyadmin.test, mail.test.
 /// They are served by the primary server with the active PHP version.
 pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {

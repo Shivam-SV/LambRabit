@@ -28,6 +28,8 @@ interface AppStore {
   navigate: (page: PageId) => void;
   diagnosticsOpen: boolean;
   setDiagnosticsOpen: (open: boolean) => void;
+  newProjectOpen: boolean;
+  setNewProjectOpen: (open: boolean) => void;
   logs: LogEntry[];
   notices: Notice[];
   activity: Activity[];
@@ -52,6 +54,8 @@ export const useAppStore = create<AppStore>((set) => ({
   navigate: (page) => set({ page }),
   diagnosticsOpen: false,
   setDiagnosticsOpen: (diagnosticsOpen) => set({ diagnosticsOpen }),
+  newProjectOpen: false,
+  setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
   logs: [],
   notices: [],
   activity: [{ id: nextId++, at: new Date(), text: "Environment ready", source: "System", tone: "info" }],

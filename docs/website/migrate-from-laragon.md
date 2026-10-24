@@ -16,7 +16,7 @@ Laragon and lampRabit work the same way: every folder in `www` becomes `folder.t
 | Database tools | HeidiSQL, phpMyAdmin (add-on) | phpMyAdmin and Adminer, one click |
 | Email | Mailpit / Mail Catcher | Mailpit, with PHP `mail()` routed automatically |
 | Run as administrator | Usually | No; asks only for the hosts file and certificate |
-| Quick app (Laravel, WordPress) | Menu → Quick app | Coming soon: Create project with presets |
+| Quick app (Laravel, WordPress) | Menu → Quick app | Sites → New project, with Laravel, Symfony, WordPress, blank and static presets |
 | Terminal (Cmder) | Built in | Coming soon: Open terminal |
 | Node.js, ngrok | Built in | Coming soon: NVM-managed Node, Ngrok and Cloudflare tunnels |
 
@@ -102,7 +102,6 @@ Once everything works, uninstall Laragon. Keep your `.sql` export until you're s
 ## What's not there yet
 
 These Laragon features are coming soon to lampRabit:
-- **Quick app** → **Create project** with Laravel, WordPress, Symfony and blank presets (including database creation).
 - **Terminal** → **Open terminal** with PHP, Composer and Node on the PATH.
 - **Node.js** → install and switch versions through NVM.
 - **ngrok** → Ngrok and Cloudflare tunnels, app-wide and per project.
