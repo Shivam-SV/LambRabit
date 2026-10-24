@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pause, Play, Search, Trash2 } from "lucide-react";
+import { Download, Pause, Play, Search, Trash2 } from "lucide-react";
 import clsx from "clsx";
+import { save } from "@tauri-apps/plugin-dialog";
 import { api, type LogService } from "../lib/api";
 import type { Level, LogEntry } from "../lib/logparse";
 import { useAppStore } from "../lib/store";
@@ -31,6 +32,15 @@ const levels: Record<Level, { dot: string; text: string }> = {
   access: { dot: "bg-sky-400", text: "text-sky-300" },
   debug: { dot: "bg-slate-500", text: "text-slate-400" },
 };
+
+const levelOrder: Level[] = ["error", "warn", "notice", "info", "access", "debug"];
+
+const ranges = [
+  { id: "all", label: "All time", ms: Infinity },
+  { id: "15m", label: "Last 15 minutes", ms: 15 * 60_000 },
+  { id: "1h", label: "Last hour", ms: 60 * 60_000 },
+  { id: "24h", label: "Last 24 hours", ms: 24 * 60 * 60_000 },
+] as const;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const stamp = (d: Date) =>
@@ -66,6 +76,8 @@ export default function Logs() {
     loadHistory(await api.logHistory());
   };
   const [query, setQuery] = useState("");
+  const [shownLevels, setShownLevels] = useState<Set<Level>>(() => new Set(levelOrder));
+  const [range, setRange] = useState<(typeof ranges)[number]["id"]>("all");
   const [autoScroll, setAutoScroll] = useState(true);
   /** When paused, the view is frozen at this many lines. */
   const [frozen, setFrozen] = useState<LogEntry[] | null>(null);
@@ -74,10 +86,40 @@ export default function Logs() {
   const source = frozen ?? logs;
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const since = Date.now() - ranges.find((r) => r.id === range)!.ms;
     return source.filter(
-      (l) => (service === "all" || l.service === service) && (!q || l.message.toLowerCase().includes(q)),
+      (l) =>
+        (service === "all" || l.service === service) &&
+        shownLevels.has(l.level) &&
+        l.time.getTime() >= since &&
+        (!q || l.message.toLowerCase().includes(q)),
     );
-  }, [source, service, query]);
+  }, [source, service, query, shownLevels, range]);
+
+  const toggleLevel = (level: Level) =>
+    setShownLevels((prev) => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+
+  const exportLogs = async () => {
+    const path = await save({
+      defaultPath: `lamprabit-logs-${stamp(new Date()).replace(/[: ]/g, "-")}.log`,
+      filters: [{ name: "Log file", extensions: ["log", "txt"] }],
+    });
+    if (!path) return;
+    const text = visible
+      .map((l) => `[${stamp(l.time)}] [${badge[l.service].label}] ${l.level.padEnd(6)} | ${l.message}`)
+      .join("\n");
+    try {
+      await api.saveText(path, text + "\n");
+      notify("info", `Exported ${visible.length} lines`);
+    } catch (e) {
+      notify("error", String(e));
+    }
+  };
   const newWhilePaused = frozen ? Math.max(0, logs.length - frozen.length) : 0;
 
   useEffect(() => {
@@ -151,8 +193,42 @@ export default function Logs() {
         }
       />
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-sm text-muted">Severity</span>
+        {levelOrder.map((level) => (
+          <button
+            key={level}
+            onClick={() => toggleLevel(level)}
+            aria-pressed={shownLevels.has(level)}
+            className={clsx(
+              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium capitalize transition-colors",
+              shownLevels.has(level) ? "border-line bg-surface text-fg shadow-card" : "border-dashed border-line text-muted opacity-60",
+            )}
+          >
+            <span className={clsx("size-1.5 rounded-full", levels[level].dot)} />
+            {level}
+          </button>
+        ))}
+        <span className="flex-1" />
+        <select
+          value={range}
+          onChange={(e) => setRange(e.target.value as typeof range)}
+          aria-label="Time range"
+          className="h-8 rounded-lg border border-line bg-surface px-2 text-sm shadow-card"
+        >
+          {ranges.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" onClick={exportLogs} disabled={visible.length === 0}>
+          <Download size={14} /> Export
+        </Button>
+      </div>
+
       <div className="overflow-hidden rounded-2xl border border-white/5 bg-[#10151c] text-slate-200 shadow-float">
-        <div ref={scroller} className="selectable h-[calc(100vh-21rem)] min-h-64 overflow-auto px-5 py-4 font-mono text-[13px] leading-7">
+        <div ref={scroller} className="selectable h-[calc(100vh-24rem)] min-h-64 overflow-auto px-5 py-4 font-mono text-[13px] leading-7">
           {visible.length === 0 ? (
             <div className="flex h-full items-center justify-center font-sans text-sm text-slate-500">
               {loading ? "Loading logs…" : logs.length === 0 ? "No log output yet. Start a service to see its logs here." : "No lines match your filter."}

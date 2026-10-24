@@ -18,6 +18,7 @@ import {
   Sun,
   SunMedium,
   TerminalSquare,
+  Activity as Pulse,
   Mail,
   Table2,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { useAppStore, type Activity } from "../lib/store";
 import { formatClock, formatUptime, useNow } from "../lib/time";
 import { Button, Card, Pill } from "../components/ui";
 import Menu from "../components/Menu";
+import ProblemPanel from "../components/ProblemPanel";
 
 const greetings = [
   { until: 5, text: "Good evening", icon: Moon },
@@ -54,9 +56,17 @@ export default function Overview() {
   const running = installed.filter((s) => s.state === "running");
   const siteCount = sites.data?.sites.length ?? 0;
 
+  const troubled = installed.filter((s) => s.problem || s.health?.status === "degraded");
+
   const status =
     installed.length === 0
       ? { tone: "muted", title: "Set up your stack", line: "Install Apache, PHP and MariaDB from Services" }
+      : troubled.length > 0
+        ? {
+            tone: "danger",
+            title: "Needs attention",
+            line: `${troubled.map((s) => s.label).join(" and ")} ${troubled.length === 1 ? "has" : "have"} a problem. Details are on the card below.`,
+          }
       : running.length === installed.length
         ? { tone: "ok", title: "All systems running", line: "Your local development environment is running smoothly." }
         : running.length > 0
@@ -79,6 +89,7 @@ export default function Overview() {
             status.tone === "ok" && "border-accent/25 bg-accent-soft",
             status.tone === "warn" && "border-warn/30 bg-warn/10",
             status.tone === "muted" && "border-line bg-surface",
+            status.tone === "danger" && "border-danger/30 bg-danger-soft",
           )}
         >
           <div className="flex items-center gap-2.5">
@@ -88,6 +99,7 @@ export default function Overview() {
                 status.tone === "ok" && "bg-ok",
                 status.tone === "warn" && "bg-warn",
                 status.tone === "muted" && "bg-muted/50",
+                status.tone === "danger" && "bg-danger",
               )}
             />
             <span
@@ -95,6 +107,7 @@ export default function Overview() {
                 "font-semibold",
                 status.tone === "ok" && "text-accent-text",
                 status.tone === "warn" && "text-warn",
+                status.tone === "danger" && "text-danger-text",
               )}
             >
               {status.title}
@@ -134,10 +147,15 @@ function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: numbe
   const running = service.state === "running";
   const busy = service.state === "starting" || service.state === "stopping" || restart.isPending;
 
+  const degraded = running && service.health?.status === "degraded";
   const pill = !service.installed ? (
     <Pill tone="muted">Not installed</Pill>
+  ) : degraded ? (
+    <Pill tone="danger">Not responding</Pill>
   ) : running ? (
-    <Pill tone="ok">Running</Pill>
+    <Pill tone="ok">{service.health?.status === "healthy" ? "Healthy" : "Running"}</Pill>
+  ) : service.problem ? (
+    <Pill tone="danger">Failed</Pill>
   ) : service.state === "stopped" || service.state === "error" ? (
     <Pill tone="muted">Stopped</Pill>
   ) : (
@@ -219,6 +237,17 @@ function ServiceCard({ service, now, sites }: { service: ServiceInfo; now: numbe
           </div>
         ))}
       </dl>
+
+      {degraded && (
+        <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm">
+          <Pulse size={16} className="mt-0.5 shrink-0 text-warn" />
+          <div>
+            <span className="font-medium">The process is running but not answering.</span>{" "}
+            <span className="text-muted">{service.health?.detail} Try Restart, or check the Logs page.</span>
+          </div>
+        </div>
+      )}
+      {service.problem && !running && <ProblemPanel kind={service.kind} problem={service.problem} />}
 
       <div className="mt-5 flex flex-wrap items-center gap-2.5">
         {!service.installed ? (

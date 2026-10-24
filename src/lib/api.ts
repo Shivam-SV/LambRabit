@@ -56,6 +56,38 @@ export interface ServiceInfo {
   startedAt: number | null;
   configPath: string;
   logPath: string;
+  health: Health | null;
+  problem: Problem | null;
+}
+
+export interface Health {
+  status: "checking" | "healthy" | "degraded";
+  detail: string | null;
+  checkedAt: number;
+}
+
+export interface PortOwner {
+  pid: number;
+  name: string;
+  note: string | null;
+  stoppable: boolean;
+}
+
+export interface Problem {
+  title: string;
+  detail: string;
+  fixes: string[];
+  port: number | null;
+  owner: PortOwner | null;
+  at: number;
+}
+
+export interface PortStatus {
+  key: keyof Settings["ports"];
+  port: number;
+  free: boolean;
+  usedByService: string | null;
+  owner: PortOwner | null;
 }
 
 export interface Site {
@@ -140,6 +172,11 @@ export const api = {
   startAll: () => invoke<string[]>("start_all"),
   stopAll: () => invoke<void>("stop_all"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
+  portStatus: () => invoke<PortStatus[]>("port_status"),
+  stopProcess: (pid: number) => invoke<void>("stop_process", { pid }),
+  clearProblem: (kind: ServiceKind) => invoke<void>("clear_problem", { kind }),
+  diagnostics: (redact: boolean) => invoke<string>("diagnostics", { redact }),
+  saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
   logHistory: () => invoke<LogHistory>("log_history"),
   clearLogs: () => invoke<void>("clear_logs"),
   runtimeCatalog: (runtime: Runtime) => invoke<Release[]>("runtime_catalog", { runtime }),

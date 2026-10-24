@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
-import { CheckCircle2, FolderOpen, Layers, Mail, Monitor, Moon, Plug, Save, Settings2, Sun } from "lucide-react";
-import { api, runtimeLabels, type EnvPaths, type Runtime, type Settings as SettingsT } from "../lib/api";
+import {
+  CheckCircle2,
+  FolderOpen,
+  Layers,
+  LifeBuoy,
+  Mail,
+  Monitor,
+  Moon,
+  Plug,
+  Save,
+  Settings2,
+  Stethoscope,
+  Sun,
+} from "lucide-react";
+import clsx from "clsx";
+import { api, runtimeLabels, type EnvPaths, type PortStatus, type Runtime, type Settings as SettingsT } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useTheme } from "../lib/theme";
 import { runtimeTiles } from "../components/runtimes";
@@ -40,6 +54,8 @@ export default function Settings() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
+  const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
+  const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
 
@@ -171,6 +187,11 @@ export default function Settings() {
                   value={draft.ports[key]}
                   onChange={(e) => setDraft({ ...draft, ports: { ...draft.ports, [key]: Number(e.target.value) } })}
                 />
+                <PortState
+                  port={draft.ports[key]}
+                  saved={settings.data?.ports[key]}
+                  status={ports.data?.find((p) => p.key === key)}
+                />
               </Field>
             ))}
           </div>
@@ -294,8 +315,68 @@ export default function Settings() {
             </div>
           </div>
         </SectionCard>
+
+        <SectionCard
+          icon={<LifeBuoy size={22} />}
+          title="Troubleshooting"
+          subtitle="When something doesn't start or behaves oddly."
+          className="lg:col-span-2"
+        >
+          <div className="flex flex-wrap items-center gap-4">
+            <p className="min-w-60 flex-1 text-sm text-muted">
+              The diagnostics report collects versions, service health, who is using each port, the Apache config
+              test, hosts and certificate status, and recent errors. Copy it into an issue or keep it for later.
+            </p>
+            <Button variant="primary" onClick={() => openDiagnostics(true)}>
+              <Stethoscope size={16} /> Run diagnostics
+            </Button>
+          </div>
+        </SectionCard>
       </div>
     </>
+  );
+}
+
+/** Live status under a port field: free, lampRabit's own, or taken by another program. */
+function PortState({ port, saved, status }: { port: number; saved?: number; status?: PortStatus }) {
+  const edited = saved !== undefined && port !== saved;
+  const check = useQuery({
+    queryKey: ["check-port", port],
+    queryFn: () => api.checkPort(port),
+    enabled: edited && port > 0 && port < 65536,
+  });
+
+  let tone: "ok" | "muted" | "warn" = "muted";
+  let text: string;
+  if (edited) {
+    if (check.data === undefined) return null;
+    tone = check.data ? "ok" : "warn";
+    text = check.data ? "Available" : "In use by another program";
+  } else if (!status) {
+    return null;
+  } else if (status.free) {
+    tone = "ok";
+    text = "Available";
+  } else if (status.usedByService) {
+    text = `In use by lampRabit (${status.usedByService})`;
+  } else {
+    tone = "warn";
+    text = status.owner ? `In use by ${status.owner.name} (PID ${status.owner.pid})` : "In use by another program";
+  }
+
+  return (
+    <span
+      className={clsx(
+        "mt-1.5 flex items-center gap-1.5 text-xs",
+        tone === "ok" && "text-accent-text",
+        tone === "muted" && "text-muted",
+        tone === "warn" && "text-warn",
+      )}
+      title={status?.owner?.note ?? undefined}
+    >
+      <span className={clsx("size-1.5 rounded-full", tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-warn" : "bg-muted/60")} />
+      {text}
+    </span>
   );
 }
 

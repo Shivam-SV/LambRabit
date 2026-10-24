@@ -99,7 +99,9 @@ PidFile "{pidfile}"
 ErrorLog "{logs}/apache-error.log"
 LogLevel warn
 LogFormat "%h %l %u %t \"%r\" %>s %b \"%{{Referer}}i\" \"%{{User-Agent}}i\"" combined
-CustomLog "{logs}/apache-access.log" combined
+# lampRabit's own health checks would otherwise add a line every few seconds.
+SetEnvIf User-Agent "^lampRabit/" lamprabit_probe
+CustomLog "{logs}/apache-access.log" combined env=!lamprabit_probe
 
 TypesConfig conf/mime.types
 AddType application/x-compress .Z
@@ -303,6 +305,8 @@ bind-address=127.0.0.1
 collation-server=utf8mb4_unicode_ci
 log-error="{logs}/mariadb-error.log"
 max_allowed_packet=64M
+# Level 1 keeps real warnings but not "Aborted connection" notes from health checks.
+log_warnings=1
 innodb_buffer_pool_size=256M
 
 [client]

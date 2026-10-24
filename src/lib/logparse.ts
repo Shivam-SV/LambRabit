@@ -6,6 +6,8 @@ export interface LogEntry {
   id: number;
   service: LogService;
   time: Date;
+  /** False when the line carried no timestamp and `time` is when it was read. */
+  timed: boolean;
   level: Level;
   message: string;
 }
@@ -33,7 +35,7 @@ function levelFromText(text: string): Level {
 
 /** Extracts time, level and message from the formats Apache, MariaDB and PHP write. */
 export function parseLog(raw: RawLogLine, received = new Date()): LogEntry {
-  const base = { id: raw.id, service: raw.service };
+  const base = { id: raw.id, service: raw.service, timed: true };
   const line = raw.line;
   let m: RegExpMatchArray | null;
 
@@ -91,5 +93,5 @@ export function parseLog(raw: RawLogLine, received = new Date()): LogEntry {
     };
   }
 
-  return { ...base, time: received, level: levelFromText(line), message: line };
+  return { ...base, timed: false, time: received, level: levelFromText(line), message: line };
 }

@@ -12,6 +12,7 @@ use tokio::{
 use crate::{
     config::Settings,
     configs,
+    diagnose::{self, Probe, Problem},
     error::{Error, Result},
     logs::{self, Level},
     sites,
@@ -134,6 +135,21 @@ pub struct ServiceInfo {
     pub started_at: Option<u64>,
     pub config_path: PathBuf,
     pub log_path: PathBuf,
+    /// Result of the latest health probe while running.
+    pub health: Option<Health>,
+    /// Why the last start failed or the service stopped unexpectedly.
+    pub problem: Option<Problem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Health {
+    /// "checking" right after start, then "healthy" or "degraded".
+    pub status: &'static str,
+    pub detail: Option<String>,
+    pub checked_at: u64,
+    #[serde(skip)]
+    failures: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,9 +247,6 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             }
             configs::write_tools(settings, layout)?;
             let sites = sites::served(settings, layout);
-            if sites.iter().any(|s| s.ssl) && !port_free(settings.ports.https) {
-                return Err(Error::msg(format!("HTTPS port {} is already in use", settings.ports.https)));
-            }
             if sites::write_vhosts(settings, layout, &sites)? {
                 logs::system(app, Level::Info, "Created the local certificate authority for HTTPS sites");
             }
@@ -248,13 +261,53 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
         }
         ServiceKind::PhpFpm => configs::write_php(settings, layout),
         ServiceKind::Mailpit => {
-            if !port_free(settings.ports.mail_ui) {
-                return Err(Error::msg(format!("Mailpit inbox port {} is already in use", settings.ports.mail_ui)));
-            }
             std::fs::create_dir_all(layout.data("mailpit"))?;
             Ok(())
         }
     }
+}
+
+/// Every port a service will listen on.
+pub fn required_ports(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Vec<u16> {
+    let mut ports = vec![kind.port(settings)];
+    match kind {
+        ServiceKind::Apache if sites::served(settings, layout).iter().any(|s| s.ssl) => ports.push(settings.ports.https),
+        ServiceKind::Mailpit => ports.push(settings.ports.mail_ui),
+        _ => {}
+    }
+    ports
+}
+
+/// `httpd -t`: catches config mistakes (including user files in etc/apache/sites/)
+/// before Apache is started for real.
+/// Apache's config test for the diagnostics report: None when Apache isn't installed or
+/// has never been started (no generated config yet).
+pub async fn config_test(settings: &Settings, layout: &Layout) -> Option<std::result::Result<(), String>> {
+    let spec = launch_spec(ServiceKind::Apache, settings, layout).ok()?;
+    if !spec.program.exists() || !layout.etc("apache").join("httpd.conf").exists() {
+        return None;
+    }
+    Some(match apache_config_test(&spec).await {
+        None => Ok(()),
+        Some(err) => Err(err),
+    })
+}
+
+async fn apache_config_test(spec: &LaunchSpec) -> Option<String> {
+    let mut cmd = Command::new(&spec.program);
+    cmd.args(&spec.args).arg("-t").current_dir(&spec.cwd);
+    if !spec.path_prepend.is_empty() {
+        let existing = std::env::var_os("PATH").unwrap_or_default();
+        let paths = spec.path_prepend.iter().cloned().chain(std::env::split_paths(&existing));
+        cmd.env("PATH", std::env::join_paths(paths).unwrap_or(OsString::from(existing)));
+    }
+    procgroup::prepare(&mut cmd);
+    let out = cmd.output().await.ok()?;
+    if out.status.success() {
+        return None;
+    }
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+    Some(text.trim().to_string())
 }
 
 /// Brings the hosts file in line with the site list. A failure (e.g. a cancelled admin
@@ -271,7 +324,13 @@ pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, s
 }
 
 pub fn port_free(port: u16) -> bool {
-    use std::net::TcpListener;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+    // A test bind alone can succeed on Windows while another program listens on the
+    // IPv6 or loopback address, so first see whether anything answers.
+    let answers = |addr: SocketAddr| TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok();
+    if answers((Ipv4Addr::LOCALHOST, port).into()) || answers((Ipv6Addr::LOCALHOST, port).into()) {
+        return false;
+    }
     TcpListener::bind(("0.0.0.0", port)).is_ok() && TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
@@ -292,11 +351,15 @@ struct Handle {
 #[derive(Default)]
 pub struct Supervisor {
     running: Arc<Mutex<HashMap<ServiceKind, Handle>>>,
+    problems: Arc<std::sync::Mutex<HashMap<ServiceKind, Problem>>>,
+    health: Arc<std::sync::Mutex<HashMap<ServiceKind, Health>>>,
 }
 
 impl Supervisor {
     pub async fn list(&self, settings: &Settings, layout: &Layout) -> Vec<ServiceInfo> {
         let running = self.running.lock().await;
+        let problems = self.problems.lock().unwrap().clone();
+        let health = self.health.lock().unwrap().clone();
         ServiceKind::all()
             .into_iter()
             .map(|kind| {
@@ -315,9 +378,78 @@ impl Supervisor {
                     started_at: handle.and_then(|h| h.started_at),
                     config_path: kind.config_path(layout),
                     log_path: kind.log_path(layout),
+                    health: handle.filter(|h| h.state == ServiceState::Running).and_then(|_| health.get(&kind).cloned()),
+                    problem: problems.get(&kind).cloned(),
                 }
             })
             .collect()
+    }
+
+    pub fn clear_problem(&self, kind: ServiceKind) {
+        self.problems.lock().unwrap().remove(&kind);
+    }
+
+    fn set_problem(&self, kind: ServiceKind, problem: Problem) {
+        self.problems.lock().unwrap().insert(kind, problem);
+    }
+
+    /// PIDs of everything lampRabit runs, to recognise its own ports.
+    pub async fn pids(&self) -> HashMap<u32, ServiceKind> {
+        self.running.lock().await.iter().filter_map(|(k, h)| Some((h.pid?, *k))).collect()
+    }
+
+    /// Probes every running service and emits `service-health` when a status changes.
+    pub async fn check_health(&self, app: &AppHandle, settings: &Settings, client: &reqwest::Client) {
+        let running: Vec<(ServiceKind, u64)> = self
+            .running
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, h)| h.state == ServiceState::Running)
+            .filter_map(|(k, h)| Some((*k, h.started_at?)))
+            .collect();
+        self.health.lock().unwrap().retain(|k, _| running.iter().any(|(r, _)| r == k));
+
+        for (kind, started_at) in running {
+            let probe = match kind {
+                ServiceKind::Apache => {
+                    diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.http)).await
+                }
+                ServiceKind::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
+                ServiceKind::PhpFpm => diagnose::probe_tcp(settings.ports.php_fpm).await,
+                ServiceKind::Mailpit => {
+                    diagnose::probe_http(client, &format!("http://127.0.0.1:{}/livez", settings.ports.mail_ui)).await
+                }
+            };
+            let young = now_ms().saturating_sub(started_at) < 8_000;
+            let changed = {
+                let mut map = self.health.lock().unwrap();
+                let prev = map.get(&kind).cloned();
+                let failures = match &probe {
+                    Probe::Ok => 0,
+                    Probe::Bad(_) => prev.as_ref().map_or(0, |p| p.failures) + 1,
+                };
+                // One failed probe can be a blip; two in a row is a real problem.
+                let (status, detail) = match probe {
+                    Probe::Ok => ("healthy", None),
+                    Probe::Bad(_) if young => ("checking", None),
+                    Probe::Bad(d) if failures >= 2 => ("degraded", Some(d)),
+                    Probe::Bad(_) => prev.as_ref().map_or(("checking", None), |p| (p.status, p.detail.clone())),
+                };
+                let changed = prev.as_ref().is_none_or(|p| p.status != status || p.detail != detail);
+                if changed && status == "degraded" {
+                    logs::system(app, Level::Warn, format!("{} is not responding: {}", kind.label(), detail.clone().unwrap_or_default()));
+                }
+                if changed && status == "healthy" && prev.as_ref().is_some_and(|p| p.status == "degraded") {
+                    logs::system(app, Level::Info, format!("{} is responding again", kind.label()));
+                }
+                map.insert(kind, Health { status, detail, checked_at: now_ms(), failures });
+                changed
+            };
+            if changed {
+                let _ = app.emit("service-health", kind);
+            }
+        }
     }
 
     pub async fn is_running(&self, kind: ServiceKind) -> bool {
@@ -350,6 +482,8 @@ impl Supervisor {
                 Handle { pid: None, state: ServiceState::Starting, started_at: None, stop_tx: None },
             );
         }
+        self.clear_problem(kind);
+        self.health.lock().unwrap().remove(&kind);
         emit_status(app, kind, ServiceState::Starting, None);
         let version = kind.version(settings).unwrap_or_default();
         logs::system(app, Level::Info, format!("Starting {} {version}", kind.label()));
@@ -358,7 +492,11 @@ impl Supervisor {
             Ok(()) => Ok(()),
             Err(e) => {
                 self.running.lock().await.remove(&kind);
-                emit_status(app, kind, ServiceState::Stopped, None);
+                if !self.problems.lock().unwrap().contains_key(&kind) {
+                    self.set_problem(kind, Problem::new(format!("{} couldn't start", kind.label()), e.to_string(), &[]));
+                }
+                // Error without a message: the UI records it as a failed start; the caller shows the error.
+                emit_status(app, kind, ServiceState::Error, None);
                 logs::system(app, Level::Error, format!("{} failed to start: {e}", kind.label()));
                 Err(e)
             }
@@ -375,10 +513,29 @@ impl Supervisor {
             )));
         }
         let port = kind.port(settings);
-        if !port_free(port) {
-            return Err(Error::msg(format!("Port {port} is already in use")));
+        for p in required_ports(kind, settings, layout) {
+            if !port_free(p) {
+                let problem = diagnose::port_problem(kind.label(), p, diagnose::port_owner(p).await);
+                let message = problem.detail.clone();
+                self.set_problem(kind, problem);
+                return Err(Error::msg(message));
+            }
         }
         prepare(app, kind, settings, layout).await?;
+        if kind == ServiceKind::Apache {
+            if let Some(output) = apache_config_test(&spec).await {
+                let line = output.lines().find(|l| l.contains("rror")).unwrap_or(&output).to_string();
+                self.set_problem(
+                    kind,
+                    Problem::new(
+                        "Apache configuration error",
+                        line.clone(),
+                        &["If the error points into etc/apache/sites/, fix or remove that file. lampRabit's own config files are regenerated on every start."],
+                    ),
+                );
+                return Err(Error::msg(format!("Apache configuration test failed: {line}")));
+            }
+        }
 
         let log = OpenOptions::new()
             .create(true)
@@ -427,6 +584,8 @@ impl Supervisor {
         emit_status(app, kind, ServiceState::Running, None);
 
         let running = self.running.clone();
+        let problems = self.problems.clone();
+        let logs_to_read = [kind.log_path(layout), layout.logs().join(format!("{}-output.log", kind.id()))];
         let app = app.clone();
         let stop_cmd = spec.stop_cmd;
         tauri::async_runtime::spawn(async move {
@@ -434,10 +593,13 @@ impl Supervisor {
             let (state, message) = tokio::select! {
                 status = child.wait() => match status {
                     Ok(s) if s.success() => (ServiceState::Stopped, None),
-                    Ok(s) => (
-                        ServiceState::Error,
-                        Some(format!("{} exited with {s}. See the Logs page for details.", kind.label())),
-                    ),
+                    Ok(s) => {
+                        let tail: String = logs_to_read.iter().map(|p| diagnose::tail(p, 8 * 1024)).collect();
+                        let problem = diagnose::explain_exit(kind.label(), s.code(), &tail);
+                        let message = format!("{}: {}", problem.title, problem.detail);
+                        problems.lock().unwrap().insert(kind, problem);
+                        (ServiceState::Error, Some(message))
+                    }
                     Err(e) => (ServiceState::Error, Some(e.to_string())),
                 },
                 _ = stop_rx => {

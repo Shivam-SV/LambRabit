@@ -26,6 +26,8 @@ export const installKey = (runtime: string, version: string) => `${runtime}@${ve
 interface AppStore {
   page: PageId;
   navigate: (page: PageId) => void;
+  diagnosticsOpen: boolean;
+  setDiagnosticsOpen: (open: boolean) => void;
   logs: LogEntry[];
   notices: Notice[];
   activity: Activity[];
@@ -48,6 +50,8 @@ let logCursor = 0;
 export const useAppStore = create<AppStore>((set) => ({
   page: "overview",
   navigate: (page) => set({ page }),
+  diagnosticsOpen: false,
+  setDiagnosticsOpen: (diagnosticsOpen) => set({ diagnosticsOpen }),
   logs: [],
   notices: [],
   activity: [{ id: nextId++, at: new Date(), text: "Environment ready", source: "System", tone: "info" }],
@@ -66,7 +70,16 @@ export const useAppStore = create<AppStore>((set) => ({
     set((s) => {
       logCursor = cursor;
       // History ids are 0; give them unique negative ids so they never collide with live ones.
-      const history = lines.map((l, i) => parseLog({ ...l, id: -(i + 1) }));
+      // Lines without their own timestamp (stack traces, MariaDB's "Version:" line) take the
+      // time of the line before them in the same file.
+      const lastTime: Record<string, Date> = {};
+      const history = lines.map((l, i) => {
+        const entry = parseLog({ ...l, id: -(i + 1) });
+        const file = `${l.service}/${l.stream}`;
+        if (entry.timed) lastTime[file] = entry.time;
+        else if (lastTime[file]) entry.time = lastTime[file];
+        return entry;
+      });
       const live = s.logs.filter((l) => l.id > cursor);
       const merged = [...history, ...live].sort((a, b) => a.time.getTime() - b.time.getTime());
       return { logs: merged.slice(-MAX_LOG_LINES) };

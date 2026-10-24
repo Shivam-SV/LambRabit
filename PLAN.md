@@ -37,7 +37,7 @@ Platform rule for everything below: a setting or tool is shown only on platforms
 
 Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP and presets build on the web-server work).
 
-### 6.1 Service reliability
+### 6.1 Service reliability ✅ (plus custom title bar)
 - **Health checks**: beyond "process alive": Apache answers an HTTP probe, MariaDB answers `mariadb-admin ping`, configs pass `httpd -t` before start. States: running / stopped / degraded / failed, each with a plain-language cause and fix (known patterns: port in use, missing VC++ runtime, bad config line, InnoDB recovery).
 - **Port conflicts**: identify the owning process (Windows: TCP table → PID → name; macOS/Linux: `lsof`), explain common culprits (IIS/`http.sys` as PID 4, Skype, another XAMPP/Laragon), offer "use another port" or "stop that process" when it's safe.
 - **Activity logs**: existing System stream plus filters by severity and time range, and export (save dialog → `.log`/`.txt`).

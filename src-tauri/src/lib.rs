@@ -1,5 +1,6 @@
 mod config;
 mod configs;
+mod diagnose;
 mod error;
 mod layout;
 mod logs;
@@ -321,6 +322,209 @@ async fn clear_logs(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortStatus {
+    /// Settings key, e.g. "http" or "mailSmtp".
+    key: &'static str,
+    port: u16,
+    free: bool,
+    /// Set when one of lampRabit's own services holds the port.
+    used_by_service: Option<&'static str>,
+    owner: Option<diagnose::PortOwner>,
+}
+
+/// Who, if anyone, is on each configured port.
+#[tauri::command]
+async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
+    let (settings, layout) = state.snapshot().await;
+    let p = &settings.ports;
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui)];
+    if !cfg!(windows) {
+        ports.push(("phpFpm", p.php_fpm));
+    }
+    let mut out = Vec::new();
+    for (key, port) in ports {
+        let free = services::port_free(port);
+        let mut used_by_service = None;
+        for kind in ServiceKind::all() {
+            if state.supervisor.is_running(kind).await && services::required_ports(kind, &settings, &layout).contains(&port) {
+                used_by_service = Some(kind.label());
+            }
+        }
+        let owner = if free || used_by_service.is_some() { None } else { diagnose::port_owner(port).await };
+        out.push(PortStatus { key, port, free, used_by_service, owner });
+    }
+    Ok(out)
+}
+
+/// Stops a process that is blocking a port. Refuses system processes and lampRabit's own.
+#[tauri::command]
+async fn stop_process(app: AppHandle, state: State<'_, AppState>, pid: u32) -> Result<()> {
+    if pid == 0 || pid == 4 || pid == std::process::id() || state.supervisor.pids().await.contains_key(&pid) {
+        return Err(Error::msg("lampRabit won't stop that process."));
+    }
+    let status = if cfg!(windows) {
+        let mut cmd = tokio::process::Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/F"]);
+        procgroup::prepare(&mut cmd);
+        cmd.status().await?
+    } else {
+        tokio::process::Command::new("kill").arg(pid.to_string()).status().await?
+    };
+    if !status.success() {
+        return Err(Error::msg(format!(
+            "Couldn't stop process {pid}. It may belong to another user or need administrator rights."
+        )));
+    }
+    logs::system(&app, logs::Level::Info, format!("Stopped process {pid} to free its port"));
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_problem(state: State<'_, AppState>, kind: ServiceKind) {
+    state.supervisor.clear_problem(kind);
+}
+
+#[tauri::command]
+fn save_text(path: PathBuf, contents: String) -> Result<()> {
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+/// A Markdown report of everything useful for troubleshooting.
+#[tauri::command]
+async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String> {
+    use std::fmt::Write;
+    let (settings, layout) = state.snapshot().await;
+    let mut r = String::new();
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+
+    let _ = writeln!(r, "# lampRabit diagnostics\n");
+    let generated = now
+        .format(time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"))
+        .unwrap_or_default();
+    let _ = writeln!(r, "Generated {generated}\n");
+    let _ = writeln!(r, "## System\n");
+    let _ = writeln!(r, "- lampRabit {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(r, "- OS: {} {} ({})", std::env::consts::OS, os_version().await, std::env::consts::ARCH);
+    if cfg!(windows) {
+        let sys = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into())).join("System32");
+        for dll in ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"] {
+            let found = if sys.join(dll).exists() { "found" } else { "MISSING (install the VC++ 2015–2022 Redistributable)" };
+            let _ = writeln!(r, "- {dll}: {found}");
+        }
+    }
+
+    let _ = writeln!(r, "\n## Environment\n");
+    let _ = writeln!(r, "- Root: {}", layout.root().display());
+    let _ = writeln!(r, "- Domain suffix: .{}", settings.tld);
+    let _ = writeln!(r, "- HTTPS by default: {}", settings.https_by_default);
+    let _ = writeln!(r, "- Manage hosts file: {}", settings.manage_hosts);
+    let _ = writeln!(r, "- PHP mail() to Mailpit: {}", settings.route_mail);
+
+    let _ = writeln!(r, "\n## Runtimes\n\n| Runtime | Active | Installed |\n|---|---|---|");
+    for runtime in Runtime::ALL {
+        let mut s = settings.clone();
+        let active = active_version(&mut s, runtime).clone().unwrap_or_else(|| "—".into());
+        let installed = runtimes::installed(&layout, runtime).join(", ");
+        let _ = writeln!(r, "| {} | {active} | {} |", runtime.id(), if installed.is_empty() { "—".into() } else { installed });
+    }
+
+    let _ = writeln!(r, "\n## Services\n\n| Service | State | PID | Port | Health | Last problem |\n|---|---|---|---|---|---|");
+    for s in state.supervisor.list(&settings, &layout).await {
+        let health = s.health.as_ref().map_or("—".to_string(), |h| match &h.detail {
+            Some(d) => format!("{} ({d})", h.status),
+            None => h.status.to_string(),
+        });
+        let problem = s.problem.as_ref().map_or("—".to_string(), |p| format!("{}: {}", p.title, p.detail));
+        let _ = writeln!(
+            r,
+            "| {} {} | {:?} | {} | {} | {health} | {} |",
+            s.label,
+            s.version.as_deref().unwrap_or("(not installed)"),
+            s.state,
+            s.pid.map_or("—".into(), |p| p.to_string()),
+            s.port,
+            problem.replace('|', "\\|"),
+        );
+    }
+
+    let _ = writeln!(r, "\n## Ports\n\n| Setting | Port | Status |\n|---|---|---|");
+    for p in port_status(state.clone()).await? {
+        let status = if p.free {
+            "free".to_string()
+        } else if let Some(svc) = p.used_by_service {
+            format!("in use by lampRabit ({svc})")
+        } else if let Some(o) = &p.owner {
+            format!("in use by {} (PID {})", o.name, o.pid)
+        } else {
+            "in use (owner unknown)".into()
+        };
+        let _ = writeln!(r, "| {} | {} | {status} |", p.key, p.port);
+    }
+
+    let _ = writeln!(r, "\n## Apache configuration test\n");
+    let _ = match services::config_test(&settings, &layout).await {
+        None => writeln!(r, "Not run (Apache not installed or never started)."),
+        Some(Ok(())) => writeln!(r, "Syntax OK"),
+        Some(Err(e)) => writeln!(r, "```text\n{e}\n```"),
+    };
+
+    let served = sites::served(&settings, &layout);
+    let _ = writeln!(r, "\n## Sites and HTTPS\n");
+    let _ = writeln!(r, "- Sites: {}", served.iter().map(|s| s.domain.as_str()).collect::<Vec<_>>().join(", "));
+    let _ = writeln!(r, "- Hosts file in sync: {}", !sites::needs_hosts_file(&settings) || sites::hosts_in_sync(&served));
+    let _ = writeln!(r, "- Local CA: {}", if ssl::ca_thumbprint(&layout).is_some() {
+        if ssl::ca_trusted(&layout).await { "created, trusted" } else { "created, NOT trusted" }
+    } else {
+        "not created"
+    });
+
+    let _ = writeln!(r, "\n## Recent warnings and errors\n");
+    for file in ["lampRabit.log", "apache-error.log", "mariadb-error.log", "php-error.log", "mailpit-output.log"] {
+        let tail = diagnose::tail(&layout.logs().join(file), 64 * 1024);
+        let lines: Vec<&str> = tail
+            .lines()
+            .filter(|l| {
+                let l = l.to_lowercase();
+                ["error", "warn", "fatal", "crit", "emerg"].iter().any(|k| l.contains(k))
+            })
+            .collect();
+        let start = lines.len().saturating_sub(15);
+        if !lines.is_empty() {
+            let _ = writeln!(r, "### {file}\n\n```text\n{}\n```\n", lines[start..].join("\n"));
+        }
+    }
+
+    if redact {
+        if let Some(home) = dirs::home_dir() {
+            let home = home.to_string_lossy().to_string();
+            r = r.replace(&home, "~").replace(&home.replace('\\', "/"), "~");
+        }
+        for var in ["USERNAME", "USER"] {
+            if let Some(user) = std::env::var_os(var).map(|u| u.to_string_lossy().to_string()).filter(|u| u.len() > 2) {
+                r = r.replace(&user, "<user>");
+            }
+        }
+    }
+    Ok(r)
+}
+
+async fn os_version() -> String {
+    let (program, args): (&str, &[&str]) = if cfg!(windows) {
+        ("cmd", &["/C", "ver"])
+    } else if cfg!(target_os = "macos") {
+        ("sw_vers", &["-productVersion"])
+    } else {
+        ("uname", &["-r"])
+    };
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args);
+    procgroup::prepare(&mut cmd);
+    cmd.output().await.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+}
+
 #[tauri::command]
 fn check_port(port: u16) -> bool {
     services::port_free(port)
@@ -476,6 +680,16 @@ pub fn run() {
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let state = handle.state::<AppState>();
+                    let (settings, _) = state.snapshot().await;
+                    state.supervisor.check_health(&handle, &settings, &state.http).await;
+                }
+            });
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
                 let mut tailer = logs::Tailer::default();
                 loop {
                     let dir = Layout::new(&handle.state::<AppState>().settings.read().await.root_dir).logs();
@@ -495,6 +709,11 @@ pub fn run() {
             start_all,
             stop_all,
             check_port,
+            port_status,
+            stop_process,
+            clear_problem,
+            diagnostics,
+            save_text,
             log_history,
             clear_logs,
             restart_service,
