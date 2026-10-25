@@ -98,6 +98,31 @@ export default function Sites() {
             }
           />
         )}
+        {data && data.unserved.length > 0 && (
+          <Banner
+            icon={AlertTriangle}
+            tone="warn"
+            text={
+              <>
+                {data.unserved.length === 1 ? "One folder in www isn't served:" : `${data.unserved.length} folders in www aren't served:`}
+                <ul className="mt-1 space-y-0.5">
+                  {data.unserved.map((u) => (
+                    <li key={u.name}>
+                      <span className="font-mono font-medium">{u.name}</span> <span className="text-muted">{u.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            }
+          />
+        )}
+        {data && data.shadowedTools.length > 0 && (
+          <Banner
+            icon={AlertTriangle}
+            tone="warn"
+            text={`A folder in www uses ${data.shadowedTools.join(" and ")}, so that address shows your folder instead of the built-in tool. Rename the folder to get the tool back.`}
+          />
+        )}
         {data?.caTrusted === false && (
           <Banner
             icon={ShieldCheck}
@@ -156,7 +181,7 @@ function Banner({
   icon: LucideIcon;
   tone: "info" | "warn";
   text: ReactNode;
-  action: ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <div

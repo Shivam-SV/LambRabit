@@ -205,6 +205,10 @@ export interface SitesInfo {
   /** null while no site uses HTTPS. */
   caTrusted: boolean | null;
   caPath: string;
+  /** Folders in www that can't be served, and why. */
+  unserved: { name: string; reason: string }[];
+  /** Tool domains (adminer.test…) that a folder of the same name has taken. */
+  shadowedTools: string[];
 }
 
 export interface LogHistory {
@@ -267,6 +271,7 @@ export interface EnvPaths {
 
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
+  takeStartupWarnings: () => invoke<string[]>("take_startup_warnings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   envPaths: () => invoke<EnvPaths>("env_paths"),
   listServices: () => invoke<ServiceInfo[]>("list_services"),

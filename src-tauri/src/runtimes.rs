@@ -519,6 +519,7 @@ pub fn installed(layout: &Layout, runtime: Runtime) -> Vec<String> {
         .flatten()
         .filter(|e| e.path().join(runtime.marker()).exists())
         .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| !name.starts_with('.'))
         .collect();
     versions.sort_by(|a, b| version_key(b).cmp(&version_key(a)));
     versions
@@ -669,8 +670,38 @@ pub fn remove(layout: &Layout, runtime: Runtime, version: &str) -> Result<()> {
     if !dir.starts_with(layout.root().join("bin")) || version.contains("..") {
         return Err(Error::msg("invalid version"));
     }
-    std::fs::remove_dir_all(dir)?;
+    // Rename first: Windows refuses while any file inside is in use, so a version is
+    // either removed completely or left untouched, never half-deleted.
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let trash = dir.with_file_name(format!(".removing-{version}-{stamp}"));
+    std::fs::rename(&dir, &trash).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(32) {
+            Error::msg(format!(
+                "{} {version} is still in use by a running program. Stop the services using it (or close any terminal running it) and try again.",
+                runtime.id()
+            ))
+        } else {
+            Error::from(e)
+        }
+    })?;
+    if std::fs::remove_dir_all(&trash).is_err() {
+        // Already out of the way and invisible to lampRabit; cleaned up on a later start.
+        eprintln!("could not finish deleting {}", trash.display());
+    }
     Ok(())
+}
+
+/// Deletes leftovers of removals that couldn't finish (see `remove`).
+pub fn clean_removed(layout: &Layout) {
+    let Ok(runtimes) = std::fs::read_dir(layout.root().join("bin")) else { return };
+    for runtime in runtimes.flatten() {
+        let Ok(entries) = std::fs::read_dir(runtime.path()) else { continue };
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(".removing-") {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
