@@ -59,6 +59,10 @@ function useBackendEvents() {
 function useStartupUpdateCheck() {
   useEffect(() => {
     api
+      .takeStartupWarnings()
+      .then((warnings) => warnings.forEach((w) => useAppStore.getState().notify("error", w)))
+      .catch(() => {});
+    api
       .getSettings()
       .then((s) => {
         if (s.checkUpdates) useAppUpdate.getState().checkNow();

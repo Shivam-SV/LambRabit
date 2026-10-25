@@ -38,6 +38,9 @@ struct AppState {
     /// Cached result of the (slow) trust-store lookup; reset when trust changes.
     ca_trusted: Mutex<Option<bool>>,
     tunnels: tunnels::Tunnels,
+    /// Held by anything that starts, stops or reconfigures services, so rapid clicks
+    /// (Start all, Stop all, Start all…) run in order and the last one wins.
+    ops: Mutex<()>,
 }
 
 impl AppState {
@@ -144,9 +147,24 @@ async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
 
 #[tauri::command]
 async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
+    check_values(&mut settings)?;
     check_ports(&settings)?;
     let layout = Layout::new(&settings.root_dir);
-    layout.ensure()?;
+    check_root(&layout)?;
+    // Running services belong to the old folder; stop them before switching.
+    if state.settings.read().await.root_dir != settings.root_dir {
+        let _op = state.ops.lock().await;
+        let running: Vec<ServiceKind> = state.supervisor.pids().await.into_values().collect();
+        if !running.is_empty() {
+            logs::system(&app, logs::Level::Info, "Environment folder changed; stopping services from the old folder");
+            for &kind in &running {
+                state.supervisor.stop(&app, kind).await;
+            }
+            for kind in running {
+                state.supervisor.wait_stopped(kind).await;
+            }
+        }
+    }
     reconcile_versions(&mut settings);
     let was_on_path = state.settings.read().await.add_to_path;
     if settings.add_to_path != was_on_path {
@@ -167,6 +185,77 @@ async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings:
         }
     }
     Ok(settings)
+}
+
+/// Domain endings that exist on the internet: using one would send real websites
+/// (google.com, …) to this machine. .dev and .app also force HTTPS in browsers.
+const PUBLIC_TLDS: &[&str] = &[
+    "com", "net", "org", "io", "co", "dev", "app", "ai", "me", "info", "biz", "us", "uk", "in", "de", "fr", "eu",
+    "xyz", "site", "online", "tech", "store", "cloud", "page", "gov", "edu", "mil",
+];
+
+/// Tidies and checks values the UI can't fully constrain. Rejects rather than guesses
+/// where a guess could surprise someone.
+fn check_values(settings: &mut Settings) -> Result<()> {
+    let tld = settings.tld.trim().trim_matches('.').to_lowercase();
+    let valid_label = |l: &str| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if tld.is_empty() || !tld.split('.').all(valid_label) {
+        return Err(Error::msg("The domain suffix can use letters, numbers and dashes, for example \"test\" or \"localhost\"."));
+    }
+    let last = tld.rsplit('.').next().unwrap_or_default();
+    if PUBLIC_TLDS.contains(&last) {
+        return Err(Error::msg(format!(
+            ".{tld} is a real domain ending on the internet, so it would hide real websites. Use \"test\" or \"localhost\"."
+        )));
+    }
+    settings.tld = tld;
+    if !(1..=32).contains(&settings.php_workers) {
+        return Err(Error::msg("PHP workers must be between 1 and 32."));
+    }
+    let p = &settings.ports;
+    for (port, name) in [
+        (p.http, "Apache HTTP"), (p.https, "Apache HTTPS"), (p.nginx_http, "Nginx HTTP"), (p.nginx_https, "Nginx HTTPS"),
+        (p.mysql, "MariaDB"), (p.mail_smtp, "Mailpit SMTP"), (p.mail_ui, "Mailpit inbox"), (p.redis, "Redis"),
+        (p.memcached, "Memcached"), (p.php_fpm, "PHP FastCGI"),
+    ] {
+        if port == 0 {
+            return Err(Error::msg(format!("Choose a port for {name} (1–65535).")));
+        }
+    }
+    if p.php_fpm > 65535 - 99 {
+        return Err(Error::msg("PHP FastCGI needs 100 ports from its starting port; choose a starting port below 65437."));
+    }
+    Ok(())
+}
+
+/// The environment folder must be creatable, writable and outside system folders.
+fn check_root(layout: &Layout) -> Result<()> {
+    let root = layout.root();
+    if !root.is_absolute() {
+        return Err(Error::msg("Choose a full path for the environment folder, for example C:\\lampRabit."));
+    }
+    #[cfg(windows)]
+    {
+        let lower = root.to_string_lossy().to_lowercase();
+        let system: Vec<String> = ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"]
+            .iter()
+            .filter_map(|v| std::env::var(v).ok())
+            .map(|v| v.to_lowercase())
+            .collect();
+        if system.iter().any(|s| lower == *s || lower.starts_with(&format!("{s}\\"))) {
+            return Err(Error::msg(
+                "The environment folder can't be inside Windows or Program Files: those need administrator rights. Use something like C:\\lampRabit.",
+            ));
+        }
+    }
+    layout.ensure().map_err(|e| Error::msg(format!("Couldn't create {}: {e}", root.display())))?;
+    // Some locations accept folder creation but not writes (or redirect them); check for real.
+    let probe = layout.tmp().join(".lamprabit-write-test");
+    std::fs::write(&probe, b"ok")
+        .and_then(|_| std::fs::read(&probe))
+        .map_err(|e| Error::msg(format!("lampRabit can't write to {}: {e}", root.display())))?;
+    let _ = std::fs::remove_file(probe);
+    Ok(())
 }
 
 /// Rejects settings where two services would listen on the same port.
@@ -244,19 +333,24 @@ async fn list_services(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>> {
 
 #[tauri::command]
 async fn start_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
+    let _op = state.ops.lock().await;
     let (settings, layout) = state.snapshot().await;
     state.supervisor.start(&app, kind, &settings, &layout).await
 }
 
 #[tauri::command]
 async fn stop_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
+    let _op = state.ops.lock().await;
     state.supervisor.stop(&app, kind).await;
+    // Finish stopping before the next queued operation looks at the state.
+    state.supervisor.wait_stopped(kind).await;
     Ok(())
 }
 
 /// Starts every installed service; returns one error message per failure.
 #[tauri::command]
 async fn start_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<String>> {
+    let _op = state.ops.lock().await;
     let (settings, layout) = state.snapshot().await;
     let mut errors = Vec::new();
     for info in state.supervisor.list(&settings, &layout).await {
@@ -272,14 +366,19 @@ async fn start_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Str
 
 #[tauri::command]
 async fn stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let _op = state.ops.lock().await;
     for kind in ServiceKind::all() {
         state.supervisor.stop(&app, kind).await;
+    }
+    for kind in ServiceKind::all() {
+        state.supervisor.wait_stopped(kind).await;
     }
     Ok(())
 }
 
 #[tauri::command]
 async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
+    let _op = state.ops.lock().await;
     logs::system(&app, logs::Level::Info, format!("Restarting {}", kind.label()));
     state.supervisor.stop(&app, kind).await;
     state.supervisor.wait_stopped(kind).await;
@@ -302,6 +401,18 @@ struct SitesInfo {
     /// None while no site uses HTTPS.
     ca_trusted: Option<bool>,
     ca_path: PathBuf,
+    /// Folders in www/ that can't be served, with the reason.
+    unserved: Vec<sites::Unserved>,
+    /// Tool domains (adminer.test…) that a folder of the same name has taken.
+    shadowed_tools: Vec<String>,
+}
+
+/// Problems found while starting up, shown once the window is ready.
+struct StartupWarnings(std::sync::Mutex<Vec<String>>);
+
+#[tauri::command]
+fn take_startup_warnings(warnings: State<'_, StartupWarnings>) -> Vec<String> {
+    std::mem::take(&mut *warnings.0.lock().unwrap())
 }
 
 /// Every folder in www/ is a site, most recently modified first.
@@ -338,6 +449,8 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
         manage_hosts: settings.manage_hosts,
         ca_trusted,
         ca_path: ssl::ca_cert_path(&layout),
+        unserved: sites::unserved(&settings, &layout),
+        shadowed_tools: sites::shadowed_tools(&settings, &layout),
     })
 }
 
@@ -345,6 +458,7 @@ async fn list_sites(state: State<'_, AppState>) -> Result<SitesInfo> {
 /// (which regenerates vhosts and certificates), otherwise just syncs the hosts file.
 #[tauri::command]
 async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let _op = state.ops.lock().await;
     let (settings, layout) = state.snapshot().await;
     logs::system(&app, logs::Level::Info, "Applying site changes");
     let any_running =
@@ -363,6 +477,7 @@ async fn apply_sites(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
 
 #[tauri::command]
 async fn set_site_ssl(app: AppHandle, state: State<'_, AppState>, name: String, ssl: bool) -> Result<()> {
+    let _op = state.ops.lock().await;
     state.update_settings(|s| s.sites.entry(name.clone()).or_default().ssl = Some(ssl)).await?;
     logs::system(&app, logs::Level::Info, format!("HTTPS {} for {name}", if ssl { "enabled" } else { "disabled" }));
     restart_web_servers(&app, &state).await
@@ -371,6 +486,7 @@ async fn set_site_ssl(app: AppHandle, state: State<'_, AppState>, name: String, 
 /// Sets a site's PHP version (None = follow the active version).
 #[tauri::command]
 async fn set_site_php(app: AppHandle, state: State<'_, AppState>, name: String, version: Option<String>) -> Result<()> {
+    let _op = state.ops.lock().await;
     let (_, layout) = state.snapshot().await;
     if let Some(v) = &version {
         if !runtimes::installed(&layout, Runtime::Php).contains(v) {
@@ -386,6 +502,7 @@ async fn set_site_php(app: AppHandle, state: State<'_, AppState>, name: String, 
 /// Picks the web server for a site when both are enabled.
 #[tauri::command]
 async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: String, server: Option<config::Server>) -> Result<()> {
+    let _op = state.ops.lock().await;
     state.update_settings(|s| s.sites.entry(name.clone()).or_default().server = server).await?;
     logs::system(&app, logs::Level::Info, format!("{name} is now served by {}", match server {
         Some(config::Server::Nginx) => "Nginx",
@@ -643,6 +760,7 @@ async fn php_extensions(state: State<'_, AppState>, version: String) -> Result<V
 /// Switches an extension on or off for one PHP version and restarts PHP to apply it.
 #[tauri::command]
 async fn set_php_extension(app: AppHandle, state: State<'_, AppState>, version: String, name: String, enabled: bool) -> Result<()> {
+    let _op = state.ops.lock().await;
     state
         .update_settings(|s| {
             let choices = s.php_extensions.entry(version.clone()).or_default();
@@ -1052,9 +1170,29 @@ async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Run
             }
         }
     }
+    // A site can run a PHP version other than the default; its workers lock the files.
+    if runtime == Runtime::Php && state.supervisor.php.status().await.iter().any(|p| p.version == version && p.alive > 0) {
+        let users: Vec<String> =
+            settings.sites.iter().filter(|(_, s)| s.php.as_deref() == Some(version.as_str())).map(|(n, _)| n.clone()).collect();
+        return Err(Error::msg(format!(
+            "PHP {version} is running for {}. Switch {} to another version or stop the web server first.",
+            if users.is_empty() { "a site".to_string() } else { users.join(", ") },
+            if users.len() == 1 { "that site" } else { "those sites" },
+        )));
+    }
     runtimes::remove(&layout, runtime, &version)?;
     logs::system(&app, logs::Level::Info, format!("Removed {} {version}", runtime.id()));
-    state.update_settings(reconcile_versions).await?;
+    state
+        .update_settings(|s| {
+            reconcile_versions(s);
+            // Sites pinned to the removed PHP go back to the default version.
+            if runtime == Runtime::Php {
+                for site in s.sites.values_mut().filter(|site| site.php.as_deref() == Some(version.as_str())) {
+                    site.php = None;
+                }
+            }
+        })
+        .await?;
     if was_active && is_tool(runtime) {
         restart_if_running(&app, &state, ServiceKind::Apache).await?;
     }
@@ -1069,6 +1207,7 @@ async fn set_active_version(
     runtime: Runtime,
     version: String,
 ) -> Result<()> {
+    let _op = state.ops.lock().await;
     let (_, layout) = state.snapshot().await;
     if !runtimes::installed(&layout, runtime).contains(&version) {
         return Err(Error::msg(format!("{} {version} is not installed", runtime.id())));
@@ -1128,10 +1267,18 @@ pub fn run() {
                     }
                 }
             }
-            let mut settings = Settings::load(&settings_path)?;
-            if let Err(e) = Layout::new(&settings.root_dir).ensure() {
-                eprintln!("could not create {}: {e}", settings.root_dir.display());
+            let mut warnings = Vec::new();
+            let (mut settings, broken) = Settings::load_or_recover(&settings_path);
+            if let Some(aside) = broken {
+                warnings.push(format!(
+                    "Your settings file was damaged, so lampRabit started with default settings. The old file was kept as {}.",
+                    aside.display()
+                ));
             }
+            if let Err(e) = Layout::new(&settings.root_dir).ensure() {
+                warnings.push(format!("lampRabit can't use its environment folder {}: {e}. Choose another one in Settings → General.", settings.root_dir.display()));
+            }
+            runtimes::clean_removed(&Layout::new(&settings.root_dir));
             reconcile_versions(&mut settings);
             if tidy_extension_choices(&mut settings) {
                 let _ = settings.save(&settings_path);
@@ -1144,6 +1291,7 @@ pub fn run() {
                 installing: Mutex::new(HashSet::new()),
                 ca_trusted: Mutex::new(None),
                 tunnels: tunnels::Tunnels::default(),
+                ops: Mutex::new(()),
             });
             app.manage(logs::LogHub::default());
             {
@@ -1151,6 +1299,10 @@ pub fn run() {
                 logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
             }
             logs::system(app.handle(), logs::Level::Info, format!("lampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
+            for w in &warnings {
+                logs::system(app.handle(), logs::Level::Warn, w.clone());
+            }
+            app.manage(StartupWarnings(std::sync::Mutex::new(warnings)));
             if let Ok(settings) = app.state::<AppState>().settings.try_read() {
                 refresh_shims(app.handle(), &settings);
             }
@@ -1221,6 +1373,7 @@ pub fn run() {
             set_php_extension,
             install_php_extension,
             open_terminal,
+            take_startup_warnings,
             open_in_editor,
             vc_runtime_status,
             vc_runtime_install,

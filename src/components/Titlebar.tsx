@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Copy, FolderOpen, Minus, Play, Square, SquareTerminal, X } from "lucide-react";
+import { Copy, Download, FolderOpen, Minus, Play, Square, SquareTerminal, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
@@ -30,6 +30,8 @@ export default function Titlebar() {
   });
   const stopAll = useMutation({ mutationFn: api.stopAll, onError });
   const anyRunning = services.data?.some((s) => s.state === "running");
+  // On a fresh install there is nothing to start yet; lead to Services instead.
+  const nothingInstalled = services.data !== undefined && !services.data.some((s) => s.installed);
 
   return (
     <header
@@ -65,6 +67,10 @@ export default function Titlebar() {
         {anyRunning ? (
           <Button size="sm" onClick={() => stopAll.mutate()} disabled={stopAll.isPending}>
             <Square size={12} className="fill-current" /> Stop all
+          </Button>
+        ) : nothingInstalled ? (
+          <Button size="sm" variant="primary" onClick={() => navigate("services")}>
+            <Download size={14} /> Set up your stack
           </Button>
         ) : (
           <Button size="sm" variant="primary" onClick={() => startAll.mutate()} disabled={startAll.isPending}>

@@ -190,11 +190,31 @@ impl Settings {
         Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
     }
 
+    /// Like `load`, but a damaged file never stops the app from opening: it is moved aside
+    /// (settings.broken-<time>.toml) and defaults are used. Returns where it went, if so.
+    pub fn load_or_recover(path: &Path) -> (Self, Option<PathBuf>) {
+        match Self::load(path) {
+            Ok(settings) => (settings, None),
+            Err(_) => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let aside = path.with_file_name(format!("settings.broken-{stamp}.toml"));
+                let moved = std::fs::rename(path, &aside).is_ok();
+                (Self::default(), moved.then_some(aside))
+            }
+        }
+    }
+
+    /// Writes a temporary file and renames it over the old one, so a crash or power cut
+    /// mid-save can't leave half a settings file behind.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(path, toml::to_string_pretty(self)?)?;
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, toml::to_string_pretty(self)?)?;
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 }

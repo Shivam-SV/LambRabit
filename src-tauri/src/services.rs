@@ -341,7 +341,9 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
             } else {
                 configs::nginx_prefix(layout)?;
             }
-            sync_hosts(app, settings, layout, &sites).await;
+            // In the background: the admin prompt can sit unanswered for minutes.
+            let (app, settings, layout) = (app.clone(), settings.clone(), layout.clone());
+            tauri::async_runtime::spawn(async move { sync_hosts(&app, &settings, &layout, &sites).await });
             Ok(plan)
         }
         ServiceKind::Mariadb => {
@@ -408,6 +410,9 @@ async fn server_config_test(spec: &LaunchSpec) -> Option<String> {
 /// Brings the hosts file in line with the site list. A failure (e.g. a cancelled admin
 /// prompt) is logged but never blocks Apache from starting.
 pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, sites: &[sites::Site]) {
+    // Apache and Nginx starting together would otherwise ask for admin rights twice.
+    static HOSTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one_at_a_time = HOSTS.lock().await;
     if !settings.manage_hosts || !sites::needs_hosts_file(settings) || sites::hosts_in_sync(sites) {
         return;
     }

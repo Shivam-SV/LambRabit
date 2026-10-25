@@ -43,16 +43,80 @@ pub struct Site {
     pub node: Option<String>,
 }
 
-/// Folder name → DNS label: lowercase letters, digits and dashes.
+/// Folder name → DNS label: lowercase letters, digits and dashes. Common accented letters
+/// keep their base letter ("Café" → "cafe") instead of turning into dashes.
 fn label(name: &str) -> Option<String> {
     let label: String = name
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .map(|c| match c {
+            c if c.is_ascii_alphanumeric() => c.to_string(),
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' => "a".into(),
+            'æ' => "ae".into(),
+            'ç' | 'č' | 'ć' => "c".into(),
+            'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ę' => "e".into(),
+            'ì' | 'í' | 'î' | 'ï' | 'ī' => "i".into(),
+            'ñ' | 'ń' => "n".into(),
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' => "o".into(),
+            'ù' | 'ú' | 'û' | 'ü' | 'ū' => "u".into(),
+            'ý' | 'ÿ' => "y".into(),
+            'ß' => "ss".into(),
+            'š' | 'ś' => "s".into(),
+            'ž' | 'ź' | 'ż' => "z".into(),
+            'ł' => "l".into(),
+            _ => "-".into(),
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_string();
     (!label.is_empty() && label.len() <= 63).then_some(label)
+}
+
+/// A folder in www/ that isn't served, and why, so the Sites page can say so.
+#[derive(Debug, Clone, Serialize)]
+pub struct Unserved {
+    pub name: String,
+    pub reason: String,
+}
+
+/// Folders that scan() leaves out: names with no usable letters, names that are too long,
+/// and folders whose domain another folder already uses.
+pub fn unserved(settings: &Settings, layout: &Layout) -> Vec<Unserved> {
+    let Ok(entries) = std::fs::read_dir(layout.www()) else { return Vec::new() };
+    let served: Vec<Site> = scan(settings, layout);
+    let mut out = Vec::new();
+    for entry in entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())) {
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        if name.starts_with('.') || served.iter().any(|s| s.name == name) {
+            continue;
+        }
+        let reason = match label(&name) {
+            None if name.chars().filter(|c| c.is_ascii_alphanumeric()).count() > 63 => {
+                "The name is too long for a domain (63 characters at most). Rename the folder.".to_string()
+            }
+            None => "The name has no letters or digits a domain can use. Rename the folder, for example to plain English letters.".to_string(),
+            Some(l) => {
+                let domain = format!("{l}.{}", settings.tld);
+                match served.iter().find(|s| s.domain == domain) {
+                    Some(other) => format!("“{}” already uses {domain}. Rename one of the two folders.", other.name),
+                    None => continue,
+                }
+            }
+        };
+        out.push(Unserved { name, reason });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// Folders that took a developer tool's domain (e.g. a folder called "adminer"), hiding the tool.
+pub fn shadowed_tools(settings: &Settings, layout: &Layout) -> Vec<String> {
+    let folders = scan(settings, layout);
+    tools(settings, layout)
+        .into_iter()
+        .filter(|t| folders.iter().any(|f| f.domain == t.domain))
+        .map(|t| t.domain)
+        .collect()
 }
 
 /// Browsers resolve `*.localhost` to this machine on their own.
@@ -183,6 +247,13 @@ fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+/// A path for Nginx directives that expand variables (`root`, `alias`). Nginx has no escape
+/// for `$`, so a folder like `price$tag` would read as a variable and stop the whole
+/// server; `${dollar}` (defined in the http block) expands to a literal `$`.
+fn ngx_path(p: &Path) -> String {
+    slash(p).replace('$', "${dollar}")
+}
+
 /// The generated site config for a server: Apache's vhosts file or Nginx's whole config.
 pub fn config_path(layout: &Layout, server: Server) -> PathBuf {
     match server {
@@ -305,14 +376,14 @@ fn render_nginx(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[Po
             format!(
                 "        location ^~ /{name}/ {{\n            alias \"{dir}/\";\n            index index.php;\n{php}        }}\n",
                 name = s.name,
-                dir = slash(&s.docroot)
+                dir = ngx_path(&s.docroot)
             )
         })
         .collect();
 
     let mut servers = format!(
         "    server {{\n        listen {http} default_server;\n        server_name localhost;\n        root \"{www}\";\n        index index.php index.html index.htm;\n        autoindex on;\n{aliases}{php}    }}\n",
-        www = slash(&layout.www()),
+        www = ngx_path(&layout.www()),
         php = php_location(default_pool, "$document_root$fastcgi_script_name"),
     );
     for site in sites {
@@ -331,7 +402,7 @@ fn render_nginx(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[Po
             ),
             None => format!(
                 "        root \"{root}\";\n        index index.php index.html index.htm;\n        location / {{\n            try_files $uri $uri/ /index.php?$query_string;\n        }}\n        location ~ /\\.ht {{ deny all; }}\n{php}",
-                root = slash(&site.docroot),
+                root = ngx_path(&site.docroot),
                 php = php_location(php::pool_for(plan, site.php.as_deref(), settings), "$document_root$fastcgi_script_name"),
             ),
         };
@@ -363,6 +434,10 @@ http {{
     map $http_upgrade $connection_upgrade {{
         default upgrade;
         '' close;
+    }}
+    # A literal "$" for paths that contain one (see ngx_path).
+    geo $dollar {{
+        default "$";
     }}
     access_log "{logs}/nginx-access.log" combined if=$lamprabit_log;
     sendfile off;
@@ -581,5 +656,21 @@ mod tests {
         let out = String::from_utf8(render_hosts(current.as_bytes(), &[])).unwrap();
         assert!(!out.contains(HOSTS_BEGIN));
         assert!(out.contains("127.0.0.1 localhost"));
+    }
+
+    #[test]
+    fn folder_names_become_labels() {
+        assert_eq!(label("My App").as_deref(), Some("my-app"));
+        assert_eq!(label("Café").as_deref(), Some("cafe"));
+        assert_eq!(label("Straße").as_deref(), Some("strasse"));
+        assert_eq!(label("price$tag").as_deref(), Some("price-tag"));
+        assert_eq!(label("日本語"), None);
+        assert_eq!(label(&"a".repeat(64)), None);
+    }
+
+    #[test]
+    fn nginx_paths_keep_dollar_signs_literal() {
+        assert_eq!(ngx_path(Path::new("C:/www/price$tag")), "C:/www/price${dollar}tag");
+        assert_eq!(ngx_path(Path::new("C:/www/a${x}b")), "C:/www/a${dollar}{x}b");
     }
 }

@@ -81,14 +81,28 @@ impl Ctx<'_> {
 }
 
 /// Folder names become DNS labels, so keep them to letters, digits, dashes and underscores.
+/// Folder names Windows reserves for devices; creating them fails or misbehaves.
+const RESERVED_NAMES: &[&str] = &[
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2",
+    "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+/// MariaDB's own databases; a project must never write into these.
+const SYSTEM_DATABASES: &[&str] = &["mysql", "information_schema", "performance_schema", "sys"];
+
 pub fn validate(req: &NewProject, layout: &Layout) -> Result<()> {
     let name = req.name.trim();
+    if name.len() > 63 {
+        return Err(Error::msg("Keep the project name to 63 characters or fewer (it becomes the domain)."));
+    }
     let ok = !name.is_empty()
-        && name.len() <= 63
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         && !name.starts_with(['-', '_', '.']);
     if !ok {
         return Err(Error::msg("Use letters, numbers, dashes and underscores for the project name (it becomes the domain)."));
+    }
+    if RESERVED_NAMES.contains(&name.to_lowercase().as_str()) {
+        return Err(Error::msg(format!("\"{name}\" is a reserved name on Windows. Choose another project name.")));
     }
     if layout.www().join(name).exists() {
         return Err(Error::msg(format!("www/{name} already exists.")));
@@ -96,6 +110,9 @@ pub fn validate(req: &NewProject, layout: &Layout) -> Result<()> {
     if let Some(db) = &req.database {
         if db.is_empty() || db.len() > 64 || !db.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err(Error::msg("Database names can use letters, numbers and underscores (up to 64)."));
+        }
+        if SYSTEM_DATABASES.contains(&db.to_lowercase().as_str()) {
+            return Err(Error::msg(format!("{db} is one of MariaDB's own databases. Choose another name.")));
         }
     }
     Ok(())
@@ -219,9 +236,17 @@ pub async fn create_database(ctx: &Ctx<'_>, database: &str) -> Result<()> {
         format!("--defaults-file={}", ctx.layout.etc("mariadb").join("my.ini").display()),
         "--user=root".into(),
         "-e".into(),
-        format!("CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+        // No IF NOT EXISTS: quietly sharing another project's database (and running its
+        // migrations there) is worse than asking for a different name.
+        format!("CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
     ];
-    run(ctx, &client, &args, &home, None).await
+    run(ctx, &client, &args, &home, None).await.map_err(|e| {
+        if e.to_string().contains("1007") {
+            Error::msg(format!("A database called {database} already exists. Choose another name, or leave the database option off and use the existing one yourself."))
+        } else {
+            e
+        }
+    })
 }
 
 /// Replaces `KEY=...` lines in a .env file, adding the keys that are missing.
