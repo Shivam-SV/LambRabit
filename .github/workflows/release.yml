@@ -54,7 +54,8 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: lampRabit ${{ github.ref_name }}
-          releaseBody: See the changelog below. Download the installer for your platform.
+          # Also becomes the notes in latest.json; the app links to the release page instead of showing them.
+          releaseBody: Release notes are being written. Download the installer for your platform below.
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true

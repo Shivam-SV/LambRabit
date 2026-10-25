@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   CheckCircle2,
   CircleSlash,
+  ExternalLink,
   Feather,
   FolderOpen,
   Layers,
@@ -624,7 +626,12 @@ function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boo
           {available ? (
             <>
               <div className="font-semibold text-accent-text">Version {available.version} is available</div>
-              {available.body && <p className="mt-1 line-clamp-3 whitespace-pre-line text-muted">{available.body}</p>}
+              <button
+                className="mt-1 inline-flex items-center gap-1 text-accent-text hover:underline"
+                onClick={() => openUrl(`https://github.com/Shivam-SV/LambRabit/releases/tag/v${available.version}`).catch(() => {})}
+              >
+                What's new in {available.version} <ExternalLink size={13} />
+              </button>
             </>
           ) : checking ? (
             <span className="text-muted">Checking for updates…</span>
