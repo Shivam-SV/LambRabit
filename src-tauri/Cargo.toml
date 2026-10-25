@@ -1,6 +1,6 @@
 [package]
 name = "lamprabit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local PHP/Apache/MariaDB development environment"
 authors = ["Shivam Vastav"]
 license = "MIT"
