@@ -13,6 +13,10 @@ The updater only installs updates signed with lampRabit's key. The public half i
 
 To rotate the key: `npx tauri signer generate -w ~/.tauri/lamprabit-updater.key`, put the new `.pub` contents in `tauri.conf.json`, update the secret. Installs made with the old key won't accept updates signed with the new one.
 
+### The old repository name
+
+The repository was renamed from `LambRabit` to `LampRabit` after 0.1.1 shipped. Versions 0.1.0 and 0.1.1 check `github.com/Shivam-SV/LambRabit/...` for updates and rely on GitHub's rename redirect to reach this repository. **Never create a new repository called `LambRabit`** under this account: it would replace the redirect and those installs would stop receiving updates. Newer versions check the new name first and keep the old one only as a fallback.
+
 ### Code signing (recommended before a public launch)
 
 Unsigned installers work but trigger warnings: Windows SmartScreen ("unrecognised app") and macOS Gatekeeper (macOS refuses unnotarised apps by default). When certificates are available:
