@@ -42,7 +42,7 @@ Some features are limited by platform. Where that's the case, the feature text s
    - Migrating from Laragon
    - FAQ and troubleshooting
 5. **Changelog**: placeholder until releases start (GitHub Releases can feed it).
-6. **GitHub** link: https://github.com/Shivam-SV/LambRabit
+6. **GitHub** link: https://github.com/Shivam-SV/LampRabit
 
 ## Brand
 

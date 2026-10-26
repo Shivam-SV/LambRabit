@@ -1,6 +1,6 @@
 # Installing lampRabit
 
-> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LambRabit/releases/latest. Windows is fully supported; macOS and Linux are in preview (the app runs, but Apache, Nginx and PHP can't be downloaded there yet; see the table below).
+> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows is fully supported; macOS and Linux are in preview (the app runs, but Apache, Nginx and PHP can't be downloaded there yet; see the table below).
 
 ## System requirements
 
@@ -106,8 +106,8 @@ For contributors and early testers.
 3. Clone and run:
 
    ```bash
-   git clone https://github.com/Shivam-SV/LambRabit.git
-   cd LambRabit
+   git clone https://github.com/Shivam-SV/LampRabit.git
+   cd LampRabit
    npm install
    npm run tauri dev
    ```

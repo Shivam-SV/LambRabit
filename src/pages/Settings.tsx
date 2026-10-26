@@ -628,7 +628,7 @@ function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boo
               <div className="font-semibold text-accent-text">Version {available.version} is available</div>
               <button
                 className="mt-1 inline-flex items-center gap-1 text-accent-text hover:underline"
-                onClick={() => openUrl(`https://github.com/Shivam-SV/LambRabit/releases/tag/v${available.version}`).catch(() => {})}
+                onClick={() => openUrl(`https://github.com/Shivam-SV/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
               >
                 What's new in {available.version} <ExternalLink size={13} />
               </button>
