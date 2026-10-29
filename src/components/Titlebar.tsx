@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Download, FolderOpen, Keyboard, Minus, Play, Square, SquareTerminal, X } from "lucide-react";
+import { Copy, Download, FolderOpen, Keyboard, Minus, Moon, Play, Square, SquareTerminal, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useAppUpdate } from "../lib/updates";
 import { useStack } from "../lib/stack";
+import { useEffectiveTheme, useTheme } from "../lib/theme";
 import Logo from "./Logo";
 import { Button } from "./ui";
 
@@ -45,6 +46,7 @@ export default function Titlebar() {
         </div>
         <div className="text-xs text-muted">Local dev environment</div>
       </div>
+      <ThemeToggle />
 
       <div className="ml-auto flex items-center gap-2">
         <Button size="sm" variant="ghost" onClick={() => useAppStore.getState().setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
@@ -82,6 +84,18 @@ export default function Titlebar() {
 
       {os && os !== "macos" && <WindowControls />}
     </header>
+  );
+}
+
+/** Flips between light and dark from what's on screen; Settings → Appearance still offers "System". */
+function ThemeToggle() {
+  const effective = useEffectiveTheme();
+  const setTheme = useTheme((s) => s.setTheme);
+  const next = effective === "dark" ? "light" : "dark";
+  return (
+    <Button size="sm" variant="ghost" onClick={() => setTheme(next)} aria-label={`Switch to ${next} theme`} title={`Switch to ${next} theme`}>
+      {effective === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+    </Button>
   );
 }
 

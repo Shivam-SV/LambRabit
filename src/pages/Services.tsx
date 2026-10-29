@@ -114,7 +114,8 @@ export default function Services() {
     <>
       <PageHeader title="Services" subtitle="Choose a service to manage its versions, settings, and tools." />
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
-        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        {/* Sized to the space under the header (title bar, page header, room for the tab bar), so the list scrolls on its own and the page only when a service's details are taller. */}
+        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-19.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
           <div className="space-y-6">
             {groups.map((group) => (
               <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
