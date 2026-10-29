@@ -242,8 +242,8 @@ export default function Sites() {
           {shown.length === 0 ? (
             <p className="py-10 text-center text-muted">No projects match.</p>
           ) : (
-            <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(200px,240px)_minmax(0,1fr)]">
-              <nav aria-label="Projects" className="min-w-0 lg:h-[calc(100dvh-23rem)] lg:min-h-64 lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(200px,240px)_minmax(0,1fr)]">
+              <nav aria-label="Projects" className="scrollbar-thin min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
                 <div className="flex items-center justify-between border-b border-line px-2 pb-3">
                   <h2 className="text-sm font-bold">Projects</h2>
                   <span className="text-xs tabular-nums text-muted">{shown.length}</span>
@@ -274,7 +274,7 @@ export default function Sites() {
                   })}
                 </ul>
               </nav>
-              <div className="min-w-0 lg:h-[calc(100dvh-23rem)] lg:min-h-64 lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+              <div className="min-w-0">
                 {selectedSite ? <ProjectCard key={selectedSite.path} site={selectedSite} info={data} /> : null}
               </div>
             </div>

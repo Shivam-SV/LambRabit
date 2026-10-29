@@ -114,7 +114,7 @@ export default function Services() {
     <>
       <PageHeader title="Services" subtitle="Choose a service to manage its versions, settings, and tools." />
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
-        <nav aria-label="Services" className="hidden scrollbar-hidden lg:block lg:h-[calc(100dvh-22rem)] lg:min-h-64 lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
           <div className="space-y-6">
             {groups.map((group) => (
               <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
@@ -145,7 +145,7 @@ export default function Services() {
           </div>
         </nav>
 
-        <main className="min-w-0 lg:max-h-[calc(100dvh-22rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        <section aria-label="Service details" className="min-w-0">
           <div className="mb-4 lg:hidden">
             <label className="block text-xs font-bold text-muted uppercase" htmlFor="service-picker">Service</label>
             <select id="service-picker" value={selected} onChange={(e) => setSelected(e.target.value as ServiceSelection)} className="mt-1 h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm">
@@ -165,7 +165,7 @@ export default function Services() {
             />
           ) : selected === "node" ? <NodeCard /> : <TunnelsPanel />}
           {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
-        </main>
+        </section>
       </div>
     </>
   );

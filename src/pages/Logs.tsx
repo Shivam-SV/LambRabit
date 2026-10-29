@@ -67,6 +67,22 @@ export default function Logs() {
   const [wrapLines, setWrapLines] = useState(true);
   const [confirmClear, setConfirmClear] = useState(false);
   const [loading, setLoading] = useState(true);
+  const servicePicker = useRef<HTMLDetailsElement>(null);
+
+  // The service picker is a <details>: close it on outside clicks and Escape, like menus.
+  useEffect(() => {
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      const picker = servicePicker.current;
+      if (!picker?.open) return;
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !picker.contains(e.target as Node)) picker.open = false;
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
 
   // Always show what is on disk, including earlier runs.
   useEffect(() => {
@@ -168,7 +184,7 @@ export default function Logs() {
 
       <Card className="mb-3 shrink-0 space-y-2.5 p-3">
         <div className="flex flex-wrap items-center gap-2">
-          <details className="group relative shrink-0">
+          <details ref={servicePicker} className="group relative shrink-0">
             <summary className="flex h-10 min-w-40 cursor-pointer list-none items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 text-sm hover:border-accent/50 [&::-webkit-details-marker]:hidden">
               <span>{serviceSummary}</span><ChevronDown size={14} className="text-muted transition-transform group-open:rotate-180" />
             </summary>
@@ -225,7 +241,7 @@ export default function Logs() {
           <span className="mr-1 text-xs font-semibold text-muted">Severity</span>
           <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-line bg-bg p-1" role="group" aria-label="Filter by severity">
             {levelOrder.map((level) => (
-              <button key={level} onClick={() => toggleLevel(level)} aria-pressed={shownLevels.has(level)} className={clsx("flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors", shownLevels.has(level) ? clsx("bg-surface shadow-card", levels[level].text) : "text-muted hover:bg-surface-2 hover:text-fg")}>
+              <button key={level} onClick={() => toggleLevel(level)} aria-pressed={shownLevels.has(level)} className={clsx("flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors", shownLevels.has(level) ? "bg-surface text-fg shadow-card" : "text-muted hover:bg-surface-2 hover:text-fg")}>
                 <span className={clsx("size-1.5 rounded-full", levels[level].dot)} />{level}
               </button>
             ))}
@@ -234,13 +250,13 @@ export default function Logs() {
         </div>
       </Card>
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#10151c] text-slate-200 shadow-float" aria-label="Log output">
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#141b24] px-4 py-2.5 text-xs">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-terminal text-slate-200 shadow-float" aria-label="Log output">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-terminal-2 px-4 py-2.5 text-xs">
           <span className="font-semibold text-slate-200">Log output</span>
           <span className="text-slate-400">{serviceSummary} · {visible.length} {visible.length === 1 ? "line" : "lines"}</span>
         </div>
         <div ref={scroller} className="selectable min-h-0 flex-1 overflow-auto overscroll-contain pb-3 font-mono text-[12px] leading-6">
-          <div className={clsx("sticky top-0 z-10 grid gap-0 border-b border-white/10 bg-[#141b24] px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase", wrapLines ? "grid-cols-[11rem_7rem_6rem_minmax(0,1fr)] min-w-[38rem]" : "grid-cols-[11rem_7rem_6rem_max-content] w-max min-w-full")}>
+          <div className={clsx("sticky top-0 z-10 grid gap-0 border-b border-white/10 bg-terminal-2 px-4 py-2 text-[11px] font-semibold tracking-wide text-slate-400 uppercase", wrapLines ? "grid-cols-[11rem_7rem_6rem_minmax(0,1fr)] min-w-152" : "grid-cols-[11rem_7rem_6rem_max-content] w-max min-w-full")}>
             <span>Timestamp</span><span>Service</span><span>Level</span><span>Message</span>
           </div>
           {visible.length === 0 ? (
@@ -250,17 +266,17 @@ export default function Logs() {
           ) : (
             <div className="min-w-0">
               {visible.map((l) => (
-                <div key={l.id} className={clsx("grid items-start gap-0 px-4 py-1.5 font-mono text-[12px] leading-6 hover:bg-white/5", wrapLines ? "grid-cols-[11rem_7rem_6rem_minmax(0,1fr)] min-w-[38rem]" : "grid-cols-[11rem_7rem_6rem_max-content] w-max min-w-full")}>
+                <div key={l.id} className={clsx("grid items-start gap-0 px-4 py-1.5 font-mono text-[12px] leading-6 hover:bg-white/5", wrapLines ? "grid-cols-[11rem_7rem_6rem_minmax(0,1fr)] min-w-152" : "grid-cols-[11rem_7rem_6rem_max-content] w-max min-w-full")}>
                   <span className="whitespace-nowrap pr-3 text-slate-400">{stamp(l.time)}</span>
                   <span className="pr-3"><span className={clsx("inline-flex rounded-md px-2 py-0.5 text-[11px]", badge[l.service].className)}>{badge[l.service].label}</span></span>
                   <span className={clsx("whitespace-nowrap pr-3 capitalize", levels[l.level].text)}><span className={clsx("mr-2 inline-block size-1.5 rounded-full align-middle", levels[l.level].dot)} />{l.level}</span>
-                  <span className={clsx("min-w-0", wrapLines ? "break-words whitespace-pre-wrap" : "whitespace-pre")}>{l.message}</span>
+                  <span className={clsx("min-w-0", wrapLines ? "wrap-break-word whitespace-pre-wrap" : "whitespace-pre")}>{l.message}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
-        <div className="sticky bottom-0 z-10 flex shrink-0 flex-wrap items-center gap-3 border-t border-white/10 bg-[#141b24] px-4 py-2.5 text-xs text-slate-300">
+        <div className="sticky bottom-0 z-10 flex shrink-0 flex-wrap items-center gap-3 border-t border-white/10 bg-terminal-2 px-4 py-2.5 text-xs text-slate-300">
           <span className={clsx("size-2 rounded-full", frozen ? "bg-slate-400" : "animate-pulse bg-emerald-400")} />
           <span className={clsx("font-semibold", frozen ? "text-slate-300" : "text-emerald-300")}>{frozen ? "Paused" : "Live"}</span>
           <span className="text-slate-500">·</span>

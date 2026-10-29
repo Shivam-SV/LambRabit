@@ -4,12 +4,9 @@
 /* Reduced or no motion (see lib/motion.ts): `still:` drops movement-based utilities. */
 @custom-variant still (&:where([data-motion="reduced"] *, [data-motion="off"] *));
 
-.scrollbar-hidden {
-  scrollbar-width: none;
-}
-
-.scrollbar-hidden::-webkit-scrollbar {
-  display: none;
+/* Side lists that scroll on their own: a slim scrollbar that still shows there's more. */
+.scrollbar-thin {
+  scrollbar-width: thin;
 }
 
 /*
@@ -41,6 +38,9 @@
   --color-danger-text: var(--danger-text);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+  /* Log and command output: a dark terminal in both themes, so it's the same everywhere. */
+  --color-terminal: #10151c;
+  --color-terminal-2: #141b24;
 }
 
 :root {
