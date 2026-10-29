@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FolderOpen, Puzzle, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderOpen, Hexagon, Puzzle, RefreshCw, Share2 } from "lucide-react";
 import ExtensionsDialog from "../components/ExtensionsDialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import clsx from "clsx";
@@ -63,91 +63,113 @@ const newestFirst = (a: string, b: string) => {
   return 0;
 };
 
-/** The page's groups, in order; ids are the jump-link anchors. */
-const groups: { id: string; title: string; blurb: string }[] = [
-  { id: "web", title: "Web server and PHP", blurb: "Apache or Nginx serve your sites; PHP runs them. Install several PHP versions and pick one per site." },
-  { id: "databases", title: "Databases", blurb: "MariaDB and MySQL can run side by side. The default one is set in Settings → Databases." },
-  { id: "tools", title: "Developer tools", blurb: "Optional extras: package managers, mail catching, database and cache tools." },
-  { id: "sharing", title: "Sharing", blurb: "Put a project or any local port on a public URL." },
-];
+type ServiceSelection = Runtime | "node" | "tunnels";
 
+/** Services shown in the Settings-style grouped navigation. */
+const groups: { id: string; title: string; blurb: string; items: ServiceSelection[] }[] = [
+  { id: "web", title: "Web server and PHP", blurb: "Apache or Nginx serve your sites; PHP runs them.", items: ["apache", "nginx", "php"] },
+  { id: "databases", title: "Databases", blurb: "MariaDB and MySQL can run side by side.", items: ["mariadb", "mysql"] },
+  { id: "tools", title: "Developer tools", blurb: "Package managers, mail, database and cache tools.", items: ["composer", "node", "mailpit", "phpmyadmin", "adminer", "redis", "phpredisadmin", "memcached"] },
+  { id: "sharing", title: "Sharing", blurb: "Put a project or local port on a public URL.", items: ["cloudflared", "ngrok", "tunnels"] },
+];
 export default function Services() {
+  const [selected, setSelected] = useState<ServiceSelection>("apache");
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const find = (r: Runtime) => installed.data?.find((i) => i.runtime === r);
-  const card = (r: Runtime, extra?: { openUrl?: string; note?: string; action?: ReactNode }) => (
-    <RuntimeCard key={r} runtime={r} installed={find(r)} {...extra} />
-  );
   const defaultDb = settings.data?.defaultDatabase ?? "mariadb";
+  const selectedGroup = groups.find((g) => g.items.includes(selected))!;
+  const isRuntime = selected !== "node" && selected !== "tunnels";
+  const runtime = isRuntime ? selected as Runtime : null;
+
+  let openUrl: string | undefined;
+  let note: string | undefined;
+  if (runtime === "mariadb" || runtime === "mysql") {
+    if (find(runtime)?.active && runtime === defaultDb) note = "Default database: new projects and the mysql command use it.";
+  } else if (runtime === "composer" && !find("php")?.active) {
+    note = "Composer runs on PHP: install a PHP version first.";
+  } else if (runtime === "redis" && find("redis")?.active && !settings.data?.addToPath) {
+    note = "redis-cli works in lampRabit's terminal. Enable Add lampRabit's commands to PATH in Settings → Terminal to use it anywhere.";
+  } else if (runtime === "phpredisadmin" && !find("redis")?.active) {
+    note = "Install Redis to browse its keys here.";
+  }
+  if (runtime === "mailpit" || runtime === "phpmyadmin" || runtime === "adminer" || runtime === "phpredisadmin") {
+    openUrl = toolUrl(runtime, sites.data, settings.data?.ports.mailUi);
+  }
+
+  const status = (item: ServiceSelection) => {
+    if (item === "node") return "NVM managed";
+    if (item === "tunnels") return "Public URLs";
+    if (installed.isLoading) return "Checking…";
+    const info = find(item);
+    return info?.active ? `Active · ${info.active}` : info?.versions.length ? `${info.versions.length} installed` : "Not installed";
+  };
+  const icon = (item: ServiceSelection) =>
+    item === "node" ? <Hexagon size={16} strokeWidth={1.75} /> : item === "tunnels" ? <Share2 size={16} strokeWidth={1.75} /> : runtimeTiles[item].icon(16);
+  const iconClass = (item: ServiceSelection) =>
+    item === "node" ? "bg-lime-600/10 text-lime-600" : item === "tunnels" ? "bg-violet-500/10 text-violet-600" : runtimeTiles[item].className;
 
   return (
     <>
-      <PageHeader title="Services" subtitle="Your stack, and every version you can run it on." />
-      <nav aria-label="Service groups" className="-mt-2 mb-5 flex flex-wrap gap-2">
-        {groups.map((g) => (
-          <button
-            key={g.id}
-            onClick={() => document.getElementById(`services-${g.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            className="rounded-full border border-line bg-surface px-3 py-1 text-sm text-muted hover:border-accent/40 hover:text-fg"
-          >
-            {g.title}
-          </button>
-        ))}
-      </nav>
+      <PageHeader title="Services" subtitle="Choose a service to manage its versions, settings, and tools." />
+      <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
+        <nav aria-label="Services" className="hidden scrollbar-hidden lg:block lg:h-[calc(100dvh-22rem)] lg:min-h-64 lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+          <div className="space-y-6">
+            {groups.map((group) => (
+              <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
+                <h2 id={`service-group-${group.id}`} className="px-3 pb-2 text-xs font-bold tracking-wider text-muted uppercase">{group.title}</h2>
+                <ul className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <li key={item}>
+                      <button
+                        type="button"
+                        onClick={() => setSelected(item)}
+                        aria-current={selected === item ? "true" : undefined}
+                        className={clsx(
+                          "flex w-full items-center gap-2.5 rounded-r-lg border-l-2 px-2.5 py-2 text-left transition-colors",
+                          selected === item ? "border-accent bg-surface-2 text-fg" : "border-transparent text-fg hover:bg-surface-2",
+                        )}
+                      >
+                        <span className={clsx("flex size-7 shrink-0 items-center justify-center rounded-md", iconClass(item))}>{icon(item)}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">{item === "node" ? "Node.js" : item === "tunnels" ? "Active tunnels" : runtimeLabels[item]}</span>
+                          <span className="block truncate text-[11px] text-muted">{status(item)}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </nav>
 
-      <div className="space-y-8">
-        <Group id="web">{(["apache", "nginx", "php"] as Runtime[]).map((r) => card(r))}</Group>
-
-        <Group id="databases">
-          {(["mariadb", "mysql"] as Runtime[]).map((r) =>
-            card(r, { note: find(r)?.active && r === defaultDb ? "Default database: new projects and the mysql command use it." : undefined }),
-          )}
-        </Group>
-
-        <Group id="tools">
-          {card("composer", { note: !find("php")?.active ? "Composer runs on PHP: install a PHP version first." : undefined })}
-          <NodeCard />
-          {card("mailpit", { openUrl: toolUrl("mailpit", sites.data, settings.data?.ports.mailUi) })}
-          {card("phpmyadmin", { openUrl: toolUrl("phpmyadmin", sites.data, settings.data?.ports.mailUi) })}
-          {card("adminer", { openUrl: toolUrl("adminer", sites.data, settings.data?.ports.mailUi) })}
-          {card("redis", {
-            note:
-              find("redis")?.active && !settings.data?.addToPath
-                ? "redis-cli works in lampRabit's terminal; turn on Settings → Terminal → Add lampRabit's commands to PATH to use it anywhere."
-                : undefined,
-          })}
-          {card("phpredisadmin", {
-            openUrl: toolUrl("phpredisadmin", sites.data, settings.data?.ports.mailUi),
-            note: !find("redis")?.active ? "Shows the data of lampRabit's Redis: install Redis too." : undefined,
-          })}
-          {card("memcached")}
-        </Group>
-
-        <Group id="sharing">
-          {(["cloudflared", "ngrok"] as Runtime[]).map((r) => card(r))}
-          <TunnelsPanel />
-        </Group>
+        <main className="min-w-0 lg:max-h-[calc(100dvh-22rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+          <div className="mb-4 lg:hidden">
+            <label className="block text-xs font-bold text-muted uppercase" htmlFor="service-picker">Service</label>
+            <select id="service-picker" value={selected} onChange={(e) => setSelected(e.target.value as ServiceSelection)} className="mt-1 h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm">
+              {groups.map((group) => <optgroup key={group.id} label={group.title}>{group.items.map((item) => <option key={item} value={item}>{item === "node" ? "Node.js" : item === "tunnels" ? "Active tunnels" : runtimeLabels[item]}</option>)}</optgroup>)}
+            </select>
+          </div>
+          <div className="mb-3">
+            <p className="text-sm text-muted">{selectedGroup.blurb}</p>
+          </div>
+          {runtime ? (
+            <RuntimeCard
+              key={runtime}
+              runtime={runtime}
+              installed={find(runtime)}
+              openUrl={openUrl}
+              note={note}
+            />
+          ) : selected === "node" ? <NodeCard /> : <TunnelsPanel />}
+          {selected === "tunnels" && <p className="mt-3 text-xs text-muted">Share a project from Sites or use this panel to share any local port.</p>}
+        </main>
       </div>
     </>
   );
 }
-
-function Group({ id, children }: { id: string; children: ReactNode }) {
-  const g = groups.find((x) => x.id === id)!;
-  return (
-    <section id={`services-${id}`} aria-labelledby={`services-${id}-title`} className="scroll-mt-4 space-y-4">
-      <div>
-        <h2 id={`services-${id}-title`} className="text-xl font-bold tracking-tight">
-          {g.title}
-        </h2>
-        <p className="mt-0.5 text-sm text-muted">{g.blurb}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
-
 /**
  * One runtime: the version in use as a large tile, other installed versions next to it,
  * and the versions available to download as a list.
@@ -214,7 +236,7 @@ function RuntimeCard({
 
   return (
     <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-start gap-4 border-b border-line px-5 py-4">
+      <div className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-4">
         <IconTile className={runtimeTiles[runtime].className}>{runtimeTiles[runtime].icon(22)}</IconTile>
         <div className="min-w-0 flex-1 basis-60">
           <h3 className="text-lg font-bold tracking-tight">{label}</h3>
@@ -235,7 +257,7 @@ function RuntimeCard({
               <ExternalLink size={14} /> Open
             </Button>
           )}
-          <Button size="sm" onClick={() => catalog.refetch()} disabled={catalog.isFetching} aria-label={`Check for new ${label} versions`} title="Check for new versions">
+          <Button size="sm" variant="ghost" onClick={() => catalog.refetch()} disabled={catalog.isFetching} aria-label={`Check for new ${label} versions`} title="Check for new versions">
             <RefreshCw size={14} className={clsx(catalog.isFetching && "animate-spin")} />
           </Button>
         </div>
@@ -252,7 +274,7 @@ function RuntimeCard({
                   {(catalog.data?.find((r) => r.version === active)?.label || have.length > 1) && (
                     <div className="flex flex-wrap gap-1.5">
                       {catalog.data?.find((r) => r.version === active)?.label && (
-                        <span className="rounded bg-surface/70 px-1.5 py-0.5">{catalog.data.find((r) => r.version === active)!.label}</span>
+                        <span className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-fg">{catalog.data.find((r) => r.version === active)!.label}</span>
                       )}
                       {have.length > 1 && <span>{have.length} versions installed</span>}
                     </div>

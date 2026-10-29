@@ -112,10 +112,13 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <Titlebar />
-      <div ref={scroller} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <div ref={scroller} className={clsx("min-h-0 flex-1 overflow-x-hidden", page === "logs" ? "overflow-hidden" : "overflow-y-auto")}>
         <main
           key={page}
-          className={clsx("motion-page mx-auto px-6 pt-8 pb-32 sm:px-10", page === "overview" ? "max-w-[90rem]" : "max-w-6xl")}
+          className={clsx(
+            "motion-page mx-auto px-6 pt-8 pb-32 sm:px-10",
+            page === "overview" ? "max-w-[90rem]" : page === "logs" ? "h-full min-h-0 max-w-6xl overflow-hidden pt-4 pb-24" : "max-w-6xl",
+          )}
         >
           {page === "overview" && <Overview />}
           {page === "sites" && <Sites />}

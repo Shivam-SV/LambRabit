@@ -192,7 +192,7 @@ export default function Overview() {
               "Install Apache, PHP and MariaDB from Services to get started."
             ) : (
               <>
-                <span className={clsx("font-semibold", stack.running.length > 0 ? "text-accent-text" : "text-fg")}>
+                {/* <span className={clsx("font-semibold", stack.running.length > 0 ? "text-accent-text" : "text-fg")}>
                   {stack.running.length} of {installedCount} services running
                 </span>
                 <span className="mx-2 text-line" aria-hidden>
@@ -208,14 +208,14 @@ export default function Overview() {
                       {troubled.map((s) => s.label).join(" and ")} {troubled.length === 1 ? "needs" : "need"} attention
                     </span>
                   </>
-                )}
+                )} */}
               </>
             )}
           </p>
           {installedCount > 0 && troubled.length === 0 && (
             <figure className="mt-2 max-w-2xl">
-              <blockquote className="text-lg text-muted italic">“{quote.text}”</blockquote>
-              <figcaption className="mt-0.5 text-sm text-muted/80">— {quote.author}</figcaption>
+              <blockquote className="text-muted italic">“{quote.text}”</blockquote>
+              <figcaption className="mt-0.5 text-xs text-muted/80">— {quote.author}</figcaption>
             </figure>
           )}
         </div>
