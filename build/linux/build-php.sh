@@ -17,7 +17,11 @@ log "PHP $LINE: toolchain"
 log "PHP $LINE: sources"
 ./spc download --with-php="$LINE" --for-extensions="$PHP_EXTENSIONS" --retry=3
 log "PHP $LINE: compiling"
-./spc build "$PHP_EXTENSIONS" --build-cli --build-fpm
+# static-php-cli keeps the compiler's output in its log; show it when the build fails.
+./spc build "$PHP_EXTENSIONS" --build-cli --build-fpm || {
+    tail -n 80 log/spc.output.log >&2 2>/dev/null || true
+    exit 1
+}
 
 VERSION="$(buildroot/bin/php -r 'echo PHP_VERSION;')"
 stage="$WORK/stage-php-$VERSION"
@@ -25,10 +29,12 @@ rm -rf "$stage" && mkdir -p "$stage"
 install -m 755 buildroot/bin/php buildroot/bin/php-fpm "$stage/"
 cp source/php-src/php.ini-development source/php-src/php.ini-production source/php-src/LICENSE "$stage/"
 "$stage/php" -v
-"$stage/php" -m
-# The cache clients are the reason these builds exist instead of distro packages.
+modules="$("$stage/php" -m)"
+echo "$modules"
+# The cache clients are the reason these builds exist instead of distro packages. (Read
+# once: `php -m | grep -q` can kill php with SIGPIPE, which pipefail reports as missing.)
 for ext in redis memcached igbinary; do
-    "$stage/php" -m | grep -qx "$ext" || { echo "PHP $VERSION was built without $ext" >&2; exit 1; }
+    grep -qx "$ext" <<<"$modules" || { echo "PHP $VERSION was built without $ext" >&2; exit 1; }
 done
 check_deps "$stage/php" "$stage/php-fpm"
 # Every library compiled in (OpenSSL, ICU, libiconv, libmemcached...), as their licences require.

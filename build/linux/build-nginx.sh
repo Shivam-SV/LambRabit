@@ -21,7 +21,8 @@ zlib="$(zlib_src)"
 
 log "Nginx $VERSION ($OS $ARCH): compiling"
 cd "$src"
-# File AIO and these hardening flags exist on Linux only.
+# File AIO and these hardening flags exist on Linux only. The ${…+…} form keeps an empty
+# array from tripping `set -u` in macOS's bash 3.2.
 platform=()
 [ "$OS" = linux ] && platform=(--with-file-aio --with-ld-opt="-Wl,-z,relro,-z,now")
 ./configure \
@@ -49,7 +50,7 @@ platform=()
     --with-stream \
     --with-stream_ssl_module \
     --with-cc-opt="-O2 -fstack-protector-strong" \
-    "${platform[@]}" >/dev/null
+    ${platform[@]+"${platform[@]}"} >/dev/null
 make -j"$JOBS" >/dev/null
 
 stage="$WORK/stage-nginx-$VERSION"
