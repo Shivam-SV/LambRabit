@@ -115,7 +115,7 @@ export function ShareButton({ site }: { site: Site }) {
       {open && (
         <div
           role="menu"
-          className="motion-pop absolute right-0 bottom-full z-20 mb-1.5 w-64 rounded-xl border border-line bg-surface p-1 shadow-float"
+          className="motion-pop absolute right-0 top-full z-30 mt-1.5 w-64 rounded-xl border border-line bg-surface p-1 shadow-float"
           onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
         >
           <div className="px-2.5 pt-1.5 pb-1 text-xs text-muted">Put {site.domain} on a public URL</div>
