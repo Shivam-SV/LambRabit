@@ -58,6 +58,7 @@ install -m 755 objs/nginx "$stage/nginx"
 strip_bin "$stage/nginx"
 cp conf/mime.types conf/fastcgi_params conf/fastcgi.conf conf/nginx.conf "$stage/conf/"
 cp LICENSE "$stage/LICENSE"
+licenses "$stage" "$openssl" "$pcre2" "$zlib"
 check_deps "$stage/nginx"
 "$stage/nginx" -V
 package nginx "$VERSION" "$stage"

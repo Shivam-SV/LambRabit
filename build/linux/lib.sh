@@ -49,6 +49,19 @@ zlib_src() { unpack "$(fetch "https://github.com/madler/zlib/releases/download/v
 expat_src() { unpack "$(fetch "https://github.com/libexpat/libexpat/releases/download/R_${EXPAT_VERSION//./_}/expat-$EXPAT_VERSION.tar.gz" "$EXPAT_SHA256")"; }
 libevent_src() { unpack "$(fetch "https://github.com/libevent/libevent/releases/download/release-$LIBEVENT_VERSION-stable/libevent-$LIBEVENT_VERSION-stable.tar.gz" "$LIBEVENT_SHA256")"; }
 
+# licenses <stage> <source dir>…: copies the licence of every library compiled in, as their
+# licences require, into <stage>/licenses/<library>-<file>.
+licenses() {
+    local stage="$1" dir f
+    shift
+    mkdir -p "$stage/licenses"
+    for dir in "$@"; do
+        for f in "$dir"/LICEN[CS]E* "$dir"/COPYING*; do
+            if [ -f "$f" ]; then cp "$f" "$stage/licenses/$(basename "$dir")-$(basename "$f")"; fi
+        done
+    done
+}
+
 # package <name> <version> <dir>: tars <dir>'s contents as <name>-<version>-<os>-<arch>.tar.gz
 # and writes the matching .sha256 next to it.
 package() {

@@ -80,6 +80,7 @@ else
     done
 fi
 cp LICENSE NOTICE "$prefix/"
+licenses "$prefix" "$WORK/openssl-$OPENSSL_VERSION" "$WORK/pcre2-$PCRE2_VERSION" "$WORK/zlib-$ZLIB_VERSION" "$WORK/expat-$EXPAT_VERSION"
 check_deps "$prefix/bin/httpd" "$prefix"/modules/*.so
 # Run it from another folder, as the app will, to prove nothing points at the build path.
 moved="$WORK/moved-apache-$VERSION"

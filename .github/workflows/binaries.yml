@@ -95,6 +95,8 @@ jobs:
       - name: Build
         env:
           GITHUB_TOKEN: ${{ github.token }} # static-php-cli downloads sources from GitHub
+          # The app supports macOS 11+; without this, binaries need the runner's macOS.
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: bash build/linux/build-${{ matrix.kind }}.sh ${{ matrix.version }} ${{ matrix.args }}
       - uses: actions/upload-artifact@v5
         with:

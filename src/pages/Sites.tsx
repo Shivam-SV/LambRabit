@@ -57,6 +57,7 @@ export default function Sites() {
   const [query, setQuery] = useState("");
   const [framework, setFramework] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("recent");
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError });
   const trust = useMutation({
@@ -77,6 +78,7 @@ export default function Sites() {
     .filter((s) => !framework || (s.framework ?? "Other") === framework)
     .filter((s) => !q || s.name.toLowerCase().includes(q) || s.domain.includes(q) || (s.gitBranch ?? "").toLowerCase().includes(q))
     .sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name) : b.modified - a.modified));
+  const selectedSite = shown.find((site) => site.path === selectedPath) ?? shown[0];
 
   return (
     <>
@@ -241,10 +243,49 @@ export default function Sites() {
           {shown.length === 0 ? (
             <p className="py-10 text-center text-muted">No projects match.</p>
           ) : (
-            <div className="motion-stagger grid gap-4 xl:grid-cols-2">
-              {shown.map((site) => (
-                <ProjectCard key={site.path} site={site} info={data} />
-              ))}
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
+              <Card className="overflow-hidden p-2">
+                <div className="flex items-center justify-between px-2 py-2">
+                  <h2 className="text-sm font-bold">Projects</h2>
+                  <span className="text-xs tabular-nums text-muted">{shown.length}</span>
+                </div>
+                <ul className="space-y-1" aria-label="Projects">
+                  {shown.map((site) => {
+                    const selected = selectedSite?.path === site.path;
+                    return (
+                      <li key={site.path}>
+                        <button
+                          type="button"
+                          aria-current={selected ? "true" : undefined}
+                          onClick={() => setSelectedPath(site.path)}
+                          className={clsx(
+                            "w-full rounded-xl px-3 py-2.5 text-left transition-colors",
+                            selected ? "bg-accent-soft text-accent-text" : "text-fg hover:bg-surface-2/70",
+                          )}
+                        >
+                          <span className="block truncate text-sm font-semibold">{site.name}</span>
+                          <span className="mt-0.5 block truncate font-mono text-xs text-muted">{site.domain}</span>
+                          <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted">
+                            {site.framework ?? "Folder"}
+                            <span aria-hidden>·</span>
+                            {serviceLabels[site.server]}
+                            {site.gitBranch && <><span aria-hidden>·</span><GitBranch size={11} />{site.gitBranch}</>}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+              <div className="min-w-0">
+                {selectedSite ? (
+                  <ProjectCard key={selectedSite.path} site={selectedSite} info={data} />
+                ) : (
+                  <Card className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-muted">
+                    No projects match these filters.
+                  </Card>
+                )}
+              </div>
             </div>
           )}
         </>

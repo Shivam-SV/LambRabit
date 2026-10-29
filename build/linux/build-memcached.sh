@@ -50,6 +50,7 @@ cd "$src"
 make -j"$JOBS" memcached >/dev/null
 install -m 755 memcached "$stage/memcached"
 strip "$stage/memcached"
+licenses "$stage" "$WORK/libevent-$LIBEVENT_VERSION-stable"
 check_deps "$stage/memcached"
 "$stage/memcached" -V
 package memcached "$VERSION" "$stage"

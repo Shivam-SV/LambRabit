@@ -26,6 +26,8 @@ ln -s redis-server "$stage/redis-check-aof"
 ln -s redis-server "$stage/redis-check-rdb"
 cp redis.conf "$stage/redis.conf.sample"
 cp LICENSE* COPYING* "$stage/" 2>/dev/null || true
+# The libraries Redis vendors (jemalloc, Lua, hiredis...) bring their own licences.
+licenses "$stage" "$src"/deps/*/
 check_deps "$stage/redis-server" "$stage/redis-cli"
 "$stage/redis-server" --version
 package redis "$VERSION" "$stage"

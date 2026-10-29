@@ -31,4 +31,7 @@ for ext in redis memcached igbinary; do
     "$stage/php" -m | grep -qx "$ext" || { echo "PHP $VERSION was built without $ext" >&2; exit 1; }
 done
 check_deps "$stage/php" "$stage/php-fpm"
+# Every library compiled in (OpenSSL, ICU, libiconv, libmemcached...), as their licences require.
+./spc dump-license --for-extensions="$PHP_EXTENSIONS" --dump-dir="$stage/licenses"
+[ -n "$(ls -A "$stage/licenses")" ] || { echo "no licences were collected for PHP $VERSION" >&2; exit 1; }
 package php "$VERSION" "$stage"
