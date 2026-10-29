@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { InstallProgress, LogHistory, RawLogLine } from "./api";
+import type { InstallProgress, LogHistory, LogService, RawLogLine } from "./api";
 import { parseLog, type LogEntry } from "./logparse";
 
 const MAX_LOG_LINES = 2000;
@@ -26,10 +26,22 @@ export const installKey = (runtime: string, version: string) => `${runtime}@${ve
 interface AppStore {
   page: PageId;
   navigate: (page: PageId) => void;
+  /** Service the Logs page opens filtered to, set by "View logs" on a service. */
+  logFilter: LogService | null;
+  showLogs: (service: LogService) => void;
   diagnosticsOpen: boolean;
   setDiagnosticsOpen: (open: boolean) => void;
   newProjectOpen: boolean;
   setNewProjectOpen: (open: boolean) => void;
+  /** The keyboard shortcuts help ("?"). */
+  shortcutsOpen: boolean;
+  setShortcutsOpen: (open: boolean) => void;
+  /** How connection details are shown and copied: a URL or .env lines. */
+  connMode: "url" | "env";
+  setConnMode: (mode: "url" | "env") => void;
+  /** The stack profile Start acts on; null means every installed service. */
+  activeProfile: string | null;
+  setActiveProfile: (name: string | null) => void;
   logs: LogEntry[];
   notices: Notice[];
   activity: Activity[];
@@ -45,6 +57,25 @@ interface AppStore {
   dismiss: (id: number) => void;
 }
 
+// View preferences remembered between launches. Storage can be unavailable; a choice
+// then lasts for this session only.
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePref(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // see readPref
+  }
+}
+
 let nextId = 1;
 /** Live lines at or below this id are already part of the loaded history. */
 let logCursor = 0;
@@ -52,10 +83,24 @@ let logCursor = 0;
 export const useAppStore = create<AppStore>((set) => ({
   page: "overview",
   navigate: (page) => set({ page }),
+  logFilter: null,
+  showLogs: (logFilter) => set({ page: "logs", logFilter }),
   diagnosticsOpen: false,
   setDiagnosticsOpen: (diagnosticsOpen) => set({ diagnosticsOpen }),
   newProjectOpen: false,
   setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
+  shortcutsOpen: false,
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  connMode: readPref("connMode") === "env" ? "env" : "url",
+  setConnMode: (connMode) => {
+    writePref("connMode", connMode);
+    set({ connMode });
+  },
+  activeProfile: readPref("activeProfile"),
+  setActiveProfile: (activeProfile) => {
+    writePref("activeProfile", activeProfile);
+    set({ activeProfile });
+  },
   logs: [],
   notices: [],
   activity: [{ id: nextId++, at: new Date(), text: "Environment ready", source: "System", tone: "info" }],

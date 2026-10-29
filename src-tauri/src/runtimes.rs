@@ -31,14 +31,22 @@ pub enum Runtime {
     /// Public tunnels for sharing sites.
     Ngrok,
     Cloudflared,
-    /// Redis-compatible server (Microsoft Garnet).
+    /// Redis with redis-cli: lampRabit's builds on Linux and macOS, the community
+    /// redis-windows build (Redis compiled with MSYS2) on Windows.
     Redis,
-    /// Private .NET runtime that Garnet runs on; installed with Redis, not shown on its own.
-    Dotnet,
+    /// PHP's package manager, a single `composer.phar` run by the active PHP.
+    Composer,
+    /// Oracle MySQL, next to MariaDB on its own port.
+    Mysql,
+    /// Web interface for Redis, served like phpMyAdmin.
+    Phpredisadmin,
+    /// Memcached: lampRabit's builds on Linux and macOS, nono303's Cygwin build
+    /// (repackaged by lampRabit's CI) on Windows.
+    Memcached,
 }
 
 impl Runtime {
-    pub const ALL: [Runtime; 11] = [
+    pub const ALL: [Runtime; 14] = [
         Runtime::Apache,
         Runtime::Nginx,
         Runtime::Php,
@@ -49,7 +57,10 @@ impl Runtime {
         Runtime::Ngrok,
         Runtime::Cloudflared,
         Runtime::Redis,
-        Runtime::Dotnet,
+        Runtime::Composer,
+        Runtime::Mysql,
+        Runtime::Phpredisadmin,
+        Runtime::Memcached,
     ];
 
     pub fn id(self) -> &'static str {
@@ -64,7 +75,10 @@ impl Runtime {
             Self::Ngrok => "ngrok",
             Self::Cloudflared => "cloudflared",
             Self::Redis => "redis",
-            Self::Dotnet => "dotnet",
+            Self::Composer => "composer",
+            Self::Mysql => "mysql",
+            Self::Phpredisadmin => "phpredisadmin",
+            Self::Memcached => "memcached",
         }
     }
 
@@ -81,8 +95,11 @@ impl Runtime {
             Self::Phpmyadmin => PathBuf::from("index.php"),
             Self::Ngrok => PathBuf::from(exe("ngrok")),
             Self::Cloudflared => PathBuf::from(exe("cloudflared")),
-            Self::Redis => PathBuf::from(exe("GarnetServer")),
-            Self::Dotnet => PathBuf::from(exe("dotnet")),
+            Self::Redis => PathBuf::from(exe("redis-server")),
+            Self::Composer => PathBuf::from("composer.phar"),
+            Self::Mysql => Path::new("bin").join(exe("mysqld")),
+            Self::Phpredisadmin => PathBuf::from("index.php"),
+            Self::Memcached => PathBuf::from(exe("memcached")),
         }
     }
 }
@@ -104,9 +121,12 @@ pub struct Release {
     pub version: String,
     pub url: String,
     pub sha256: Option<String>,
-    /// Some publishers (Microsoft .NET) only give SHA-512.
+    /// For publishers that only give SHA-512.
     #[serde(default)]
     pub sha512: Option<String>,
+    /// MySQL only publishes MD5: it catches corrupt downloads, HTTPS covers the rest.
+    #[serde(default)]
+    pub md5: Option<String>,
     pub archive: Archive,
     /// Short note shown next to the version, e.g. "LTS".
     pub label: Option<String>,
@@ -128,6 +148,11 @@ fn http(e: reqwest::Error) -> Error {
     Error::msg(format!("network error: {e}"))
 }
 
+/// A version's release line: "8.4" for "8.4.27".
+fn line(v: &str) -> String {
+    v.split('.').take(2).collect::<Vec<_>>().join(".")
+}
+
 fn version_key(v: &str) -> Vec<u32> {
     v.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse().ok()).collect()
 }
@@ -143,17 +168,78 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
         Runtime::Phpmyadmin => phpmyadmin_releases(client).await?,
         Runtime::Ngrok => ngrok_releases(),
         Runtime::Cloudflared => cloudflared_releases(client).await?,
-        Runtime::Redis => garnet_releases(client).await?,
-        Runtime::Dotnet => dotnet_releases(client).await?,
+        Runtime::Redis if cfg!(windows) => redis_windows_releases(client).await?,
+        Runtime::Redis => own_builds(client, Runtime::Redis).await?,
+        Runtime::Composer => composer_releases(client).await?,
+        Runtime::Mysql => mysql_releases(client).await?,
+        Runtime::Phpredisadmin => phpredisadmin_releases(client).await?,
+        Runtime::Memcached => own_builds(client, Runtime::Memcached).await?,
     };
     releases.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
     Ok(releases)
 }
 
+/// Where lampRabit's own builds are published: Apache, Nginx, PHP, Redis and Memcached for
+/// Linux and macOS, and Memcached for Windows (see build/linux/ and
+/// .github/workflows/binaries.yml).
+/// `LAMPRABIT_BINARIES_URL` points elsewhere, for testing new builds or a mirror.
+const LINUX_BUILDS: &str = "https://github.com/Shivam-SV/LampRabit/releases/download/binaries/";
+
+/// lampRabit's builds of one runtime for this OS and CPU, from the published manifest.
+async fn own_builds(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
+    let base = std::env::var("LAMPRABIT_BINARIES_URL").unwrap_or_else(|_| LINUX_BUILDS.to_string());
+    let base = format!("{}/", base.trim_end_matches('/'));
+    let manifest: Value = client
+        .get(format!("{base}manifest.json"))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| Error::msg(format!("Couldn't load the list of lampRabit's builds: {e}")))?
+        .json()
+        .await
+        .map_err(http)?;
+    let releases: Vec<Release> = manifest["releases"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| e["runtime"] == runtime.id() && e["os"] == std::env::consts::OS && e["arch"] == std::env::consts::ARCH)
+        .filter_map(|e| {
+            Some(Release {
+                runtime,
+                version: e["version"].as_str()?.to_string(),
+                url: format!("{base}{}", e["file"].as_str()?),
+                sha256: Some(e["sha256"].as_str()?.to_string()),
+                sha512: None,
+                md5: None,
+                archive: Archive::TarGz,
+                label: e["label"].as_str().map(str::to_string),
+            })
+        })
+        .collect();
+    if releases.is_empty() {
+        return Err(Error::msg(format!(
+            "There are no {} builds of {} for {} yet",
+            std::env::consts::OS,
+            runtime.id(),
+            std::env::consts::ARCH
+        )));
+    }
+    // Only the newest patch release of each line, like the Windows catalogs.
+    let mut newest: Vec<Release> = Vec::new();
+    for r in releases {
+        match newest.iter_mut().find(|n| line(&n.version) == line(&r.version)) {
+            Some(n) if version_key(&r.version) > version_key(&n.version) => *n = r,
+            Some(_) => {}
+            None => newest.push(r),
+        }
+    }
+    Ok(newest)
+}
+
 /// windows.php.net lists the newest patch release of every branch, with checksums.
 async fn php_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     if !cfg!(windows) {
-        return Err(unsupported("PHP"));
+        return own_builds(client, Runtime::Php).await;
     }
     const BASE: &str = "https://windows.php.net/downloads/releases/";
     let json: Value = client
@@ -188,8 +274,10 @@ async fn php_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             url: format!("{BASE}{path}"),
             sha256: build["zip"]["sha256"].as_str().map(str::to_string),
             sha512: None,
+            md5: None,
             archive: Archive::Zip,
-            label: None,
+            // "8.4.27-1": the same PHP release rebuilt by windows.php.net (newer libraries).
+            label: version.split_once('-').map(|(base, _)| format!("Rebuild of {base}")),
         });
     }
     Ok(out)
@@ -198,7 +286,7 @@ async fn php_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 /// Apache Lounge only hosts its latest build, so the download page is scraped for it.
 async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     if !cfg!(windows) {
-        return Err(unsupported("Apache"));
+        return own_builds(client, Runtime::Apache).await;
     }
     const SITE: &str = "https://www.apachelounge.com";
     let page = client
@@ -237,7 +325,7 @@ async fn apache_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     };
 
     let label = file.split('-').find(|p| p.starts_with("VS")).map(|vs| vs.trim_end_matches(".zip").to_string());
-    Ok(vec![Release { runtime: Runtime::Apache, version, url, sha256, sha512: None, archive: Archive::Zip, label }])
+    Ok(vec![Release { runtime: Runtime::Apache, version, url, sha256, sha512: None, md5: None, archive: Archive::Zip, label }])
 }
 
 /// The MariaDB REST API lists stable series and the files of their latest release.
@@ -289,6 +377,7 @@ async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             url: file["file_download_url"].as_str()?.replacen("http://", "https://", 1),
             sha256: file["checksum"]["sha256sum"].as_str().map(str::to_string),
             sha512: None,
+            md5: None,
             archive,
             label,
         })
@@ -300,9 +389,7 @@ async fn mariadb_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
 /// publishes PGP signatures rather than checksums, so these downloads rely on HTTPS alone.
 async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     if !cfg!(windows) {
-        return Err(Error::msg(
-            "nginx.org only publishes Windows builds. On macOS and Linux, Nginx support will use the system package manager in a later version.",
-        ));
+        return own_builds(client, Runtime::Nginx).await;
     }
     const SITE: &str = "https://nginx.org";
     let page = client
@@ -334,6 +421,7 @@ async fn nginx_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
             url: format!("{SITE}{href}"),
             sha256: None,
             sha512: None,
+            md5: None,
             archive: Archive::Zip,
             label,
         });
@@ -382,6 +470,7 @@ async fn github_latest(
         url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
         sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
         sha512: None,
+        md5: None,
         version,
         archive,
         label: None,
@@ -416,6 +505,7 @@ fn ngrok_releases() -> Vec<Release> {
         url: format!("https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-{os}-{arch}.{ext}"),
         sha256: None,
         sha512: None,
+        md5: None,
         archive,
         label: Some("Stable channel".into()),
     }]
@@ -431,55 +521,219 @@ async fn cloudflared_releases(client: &reqwest::Client) -> Result<Vec<Release>> 
     github_latest(client, Runtime::Cloudflared, "cloudflare/cloudflared", archive, |n, _| n == name).await
 }
 
-/// Garnet: Microsoft's Redis-compatible server. Its builds need the .NET runtime, which
-/// lampRabit installs privately next to it (see `dotnet_releases`).
-async fn garnet_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
-    let (name, archive) = match std::env::consts::OS {
-        "windows" => (format!("win-{arch}-based-readytorun.zip"), Archive::Zip),
-        "macos" => (format!("osx-{arch}-based.tar.xz"), Archive::TarXz),
-        _ => (format!("linux-{arch}-based.tar.xz"), Archive::TarXz),
-    };
-    let mut releases = github_latest(client, Runtime::Redis, "microsoft/garnet", archive, |n, _| n == name).await?;
-    for r in &mut releases {
-        r.label = Some("Garnet".into());
-    }
-    Ok(releases)
-}
-
-/// The .NET release line Garnet's current builds target (their folder is `net10.0`).
-pub const DOTNET_CHANNEL: &str = "10.0";
-
-async fn dotnet_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
-    let meta = get_json(client, &format!("https://builds.dotnet.microsoft.com/dotnet/release-metadata/{DOTNET_CHANNEL}/releases.json")).await?;
-    let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
-    let (rid, ext, archive) = match std::env::consts::OS {
-        "windows" => (format!("win-{arch}"), ".zip", Archive::Zip),
-        "macos" => (format!("osx-{arch}"), ".tar.gz", Archive::TarGz),
-        _ => (format!("linux-{arch}"), ".tar.gz", Archive::TarGz),
-    };
-    let release = &meta["releases"][0];
-    let file = release["runtime"]["files"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|f| f["rid"] == rid.as_str() && f["name"].as_str().is_some_and(|n| n.contains("dotnet-runtime") && n.ends_with(ext)))
-        .ok_or_else(|| Error::msg(format!("no .NET runtime download for {rid}")))?;
-    Ok(vec![Release {
-        runtime: Runtime::Dotnet,
-        version: release["runtime"]["version"].as_str().unwrap_or_default().to_string(),
-        url: file["url"].as_str().unwrap_or_default().to_string(),
-        sha256: None,
-        sha512: file["hash"].as_str().map(str::to_string),
-        archive,
-        label: None,
-    }])
-}
-
 async fn adminer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
     // The all-drivers, all-languages single file.
     github_latest(client, Runtime::Adminer, "vrana/adminer", Archive::File, |n, v| n == format!("adminer-{v}.php"))
         .await
+}
+
+/// MySQL's own download pages block scripts, so the current version of each release line
+/// comes from the official Docker image's metadata (maintained with every release), and
+/// the archives from MySQL's CDN, which publishes an MD5 next to each.
+async fn mysql_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let (suffix, archive) = match std::env::consts::OS {
+        "windows" => ("winx64.zip", Archive::Zip),
+        // "minimal": stripped of debug symbols and tests, about a tenth of the full archive.
+        "linux" if cfg!(target_arch = "x86_64") => ("linux-glibc2.28-x86_64-minimal.tar.xz", Archive::TarXz),
+        "linux" => ("linux-glibc2.28-aarch64-minimal.tar.xz", Archive::TarXz),
+        _ => return Err(unsupported("MySQL")),
+    };
+    let lines = get_json(client, "https://raw.githubusercontent.com/docker-library/mysql/master/versions.json").await?;
+    let fetches = lines.as_object().into_iter().flatten().filter_map(|(line, info)| {
+        let version = info["version"].as_str()?.to_string();
+        let label = Some(if line == "innovation" { "Innovation".to_string() } else { "LTS".to_string() });
+        Some(async move {
+            let series = version.rsplit_once('.').map_or(version.as_str(), |(s, _)| s).to_string();
+            let url = format!("https://cdn.mysql.com/Downloads/MySQL-{series}/mysql-{version}-{suffix}");
+            let md5 = client
+                .get(format!("{url}.md5"))
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .ok()?
+                .text()
+                .await
+                .ok()?
+                .split_whitespace()
+                .next()
+                .map(str::to_string);
+            md5.as_ref()?;
+            Some(Release { runtime: Runtime::Mysql, version, url, sha256: None, sha512: None, md5, archive, label })
+        })
+    });
+    let releases: Vec<Release> = futures_util::future::join_all(fetches.collect::<Vec<_>>()).await.into_iter().flatten().collect();
+    if releases.is_empty() {
+        return Err(Error::msg("Couldn't find MySQL downloads for this system"));
+    }
+    Ok(releases)
+}
+
+/// Redis has no official Windows build. The community redis-windows project compiles each
+/// Redis release with MSYS2 (redis-server and redis-cli, with the msys DLLs they need next
+/// to them) and GitHub publishes a SHA-256 for every archive. The newest patch release of
+/// each of the last few lines is offered, like the other catalogs.
+async fn redis_windows_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let list = get_json(client, "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=60").await?;
+    let mut newest: Vec<Release> = Vec::new();
+    for release in list.as_array().into_iter().flatten().filter(|r| r["prerelease"] == false && r["draft"] == false) {
+        let version = release["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+        let name = format!("Redis-{version}-Windows-x64-msys2.zip");
+        let Some(asset) = release["assets"].as_array().into_iter().flatten().find(|a| a["name"] == name.as_str()) else { continue };
+        if newest.iter().any(|n| line(&n.version) == line(&version) && version_key(&n.version) >= version_key(&version)) {
+            continue;
+        }
+        newest.retain(|n| line(&n.version) != line(&version));
+        newest.push(Release {
+            runtime: Runtime::Redis,
+            url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
+            sha256: asset["digest"].as_str().and_then(|d| d.strip_prefix("sha256:")).map(str::to_string),
+            sha512: None,
+            md5: None,
+            version,
+            archive: Archive::Zip,
+            label: Some("redis-windows (community build)".into()),
+        });
+    }
+    if newest.is_empty() {
+        return Err(Error::msg("Couldn't find Redis builds for Windows on github.com/redis-windows"));
+    }
+    newest.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
+    newest.truncate(4);
+    Ok(newest)
+}
+
+/// phpRedisAdmin publishes source releases on GitHub (no separate archives or checksums,
+/// so this relies on HTTPS). Its PHP dependency, Predis, is added after install.
+async fn phpredisadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    let latest = get_json(client, "https://api.github.com/repos/erikdubbelboer/phpRedisAdmin/releases/latest").await?;
+    let tag = latest["tag_name"].as_str().ok_or_else(|| Error::msg("unexpected phpRedisAdmin release data"))?;
+    Ok(vec![Release {
+        runtime: Runtime::Phpredisadmin,
+        version: tag.trim_start_matches('v').to_string(),
+        url: format!("https://github.com/erikdubbelboer/phpRedisAdmin/archive/refs/tags/{tag}.zip"),
+        sha256: None,
+        sha512: None,
+        md5: None,
+        archive: Archive::Zip,
+        label: None,
+    }])
+}
+
+/// phpRedisAdmin talks to Redis through Predis, normally installed by Composer. lampRabit
+/// adds the exact version its composer.json asks for, with a two-line autoloader, so
+/// neither Composer nor PHP is needed to install it.
+pub async fn add_predis(client: &reqwest::Client, layout: &Layout, version: &str) -> Result<()> {
+    let home = layout.bin("phpredisadmin", version);
+    let target = home.join("vendor").join("predis").join("predis");
+    if target.join("autoload.php").exists() {
+        return Ok(());
+    }
+    let composer: Value = serde_json::from_str(&std::fs::read_to_string(home.join("composer.json"))?)
+        .map_err(|e| Error::msg(format!("phpRedisAdmin's composer.json: {e}")))?;
+    let predis = composer["require"]["predis/predis"].as_str().unwrap_or("v2.4.1").trim_start_matches(['^', '~', '=']);
+    let tag = if predis.starts_with('v') { predis.to_string() } else { format!("v{predis}") };
+    let bytes = client
+        .get(format!("https://github.com/predis/predis/archive/refs/tags/{tag}.zip"))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(http)?
+        .bytes()
+        .await
+        .map_err(http)?;
+    let scratch = layout.tmp().join(format!("predis-{tag}.extract"));
+    let _ = std::fs::remove_dir_all(&scratch);
+    zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .and_then(|mut z| z.extract(&scratch))
+        .map_err(|e| Error::msg(format!("could not extract Predis: {e}")))?;
+    let root = find_root(&scratch, Path::new("autoload.php"), 2).ok_or_else(|| Error::msg("the Predis archive has no autoload.php"))?;
+    std::fs::create_dir_all(target.parent().unwrap())?;
+    std::fs::rename(root, &target)?;
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::write(home.join("vendor").join("autoload.php"), "<?php\n// Written by lampRabit in place of Composer's autoloader.\nrequire __DIR__ . '/predis/predis/autoload.php';\n")?;
+    Ok(())
+}
+
+/// getcomposer.org lists the current release and the 2.2 LTS line (the last one that
+/// runs on PHP below 7.2.5), each with a published checksum.
+async fn composer_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
+    const SITE: &str = "https://getcomposer.org";
+    let index = get_json(client, &format!("{SITE}/versions")).await?;
+    let mut seen = Vec::new();
+    let fetches = index["stable"].as_array().into_iter().flatten().filter_map(|r| {
+        let version = r["version"].as_str()?.to_string();
+        let path = r["path"].as_str()?.to_string();
+        if seen.contains(&version) {
+            return None;
+        }
+        seen.push(version.clone());
+        let label = r["lts"].as_bool().unwrap_or(false).then(|| "LTS".to_string());
+        Some(async move {
+            let url = format!("{SITE}{path}");
+            let sha256 = client
+                .get(format!("{url}.sha256sum"))
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(http)?
+                .text()
+                .await
+                .map_err(http)?
+                .split_whitespace()
+                .next()
+                .map(str::to_string);
+            // Never install Composer without a checksum: it runs with your project's rights.
+            if sha256.is_none() {
+                return Err(Error::msg(format!("getcomposer.org has no checksum for Composer {version}")));
+            }
+            Ok(Release { runtime: Runtime::Composer, version, url, sha256, sha512: None, md5: None, archive: Archive::File, label })
+        })
+    });
+    futures_util::future::join_all(fetches.collect::<Vec<_>>()).await.into_iter().collect()
+}
+
+/// Composer used to live directly in `bin/composer/composer.phar`; moves it into a
+/// version folder like every other runtime. The version is read from the phar itself.
+pub fn migrate_flat_composer(layout: &Layout) {
+    let dir = layout.root().join("bin").join("composer");
+    let flat = dir.join("composer.phar");
+    let Ok(bytes) = std::fs::read(&flat) else { return };
+    let text = String::from_utf8_lossy(&bytes);
+    let version = text
+        .split("const VERSION = '")
+        .nth(1)
+        .and_then(|s| s.split('\'').next())
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'));
+    if let Some(v) = version {
+        let dest = dir.join(v);
+        if std::fs::create_dir_all(&dest).is_ok() && !dest.join("composer.phar").exists() {
+            let _ = std::fs::rename(&flat, dest.join("composer.phar"));
+        }
+    }
+    // Unreadable or a duplicate: a fresh copy is installed the next time it's needed.
+    let _ = std::fs::remove_file(&flat);
+}
+
+/// lampRabit 0.1 ran Microsoft Garnet as Redis, with a private .NET runtime and (on
+/// Windows) a separate redis-cli. Real Redis replaced it everywhere, so those folders are
+/// deleted; Garnet's versions have no redis-server and already count as not installed.
+/// Returns whether Garnet was found, so the user can be told to install Redis again.
+pub fn remove_garnet(layout: &Layout) -> bool {
+    let bin = layout.root().join("bin");
+    let garnet: Vec<PathBuf> = std::fs::read_dir(bin.join("redis"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join(exe("GarnetServer")).exists() && !p.join(Runtime::Redis.marker()).exists())
+        .collect();
+    for dir in &garnet {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    for old in ["dotnet", "rediscli"] {
+        let _ = std::fs::remove_dir_all(bin.join(old));
+    }
+    !garnet.is_empty()
 }
 
 async fn phpmyadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
@@ -506,6 +760,7 @@ async fn phpmyadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>> {
         url,
         sha256,
         sha512: None,
+        md5: None,
         archive: Archive::Zip,
         label: php,
     }])
@@ -559,6 +814,7 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
         let mut file = tokio::fs::File::create(&archive_path).await?;
         let mut hasher = Sha256::new();
         let mut hasher512 = sha2::Sha512::new();
+        let mut hasher_md5 = md5::Md5::new();
         let mut downloaded = 0u64;
         let mut last_emit = Instant::now();
         let mut stream = response.bytes_stream();
@@ -567,6 +823,7 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
             let chunk = chunk.map_err(http)?;
             hasher.update(&chunk);
             hasher512.update(&chunk);
+            hasher_md5.update(&chunk);
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
             if last_emit.elapsed() > Duration::from_millis(150) {
@@ -579,7 +836,11 @@ pub async fn install(app: &AppHandle, client: &reqwest::Client, layout: &Layout,
 
         progress("verifying", downloaded, total);
         let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let checks = [(&release.sha256, hex(&hasher.finalize())), (&release.sha512, hex(&hasher512.finalize()))];
+        let checks = [
+            (&release.sha256, hex(&hasher.finalize())),
+            (&release.sha512, hex(&hasher512.finalize())),
+            (&release.md5, hex(&hasher_md5.finalize())),
+        ];
         for (expected, actual) in checks {
             if let Some(expected) = expected {
                 if !actual.eq_ignore_ascii_case(expected) {
@@ -630,10 +891,19 @@ fn extract_into(archive: &Path, kind: Archive, scratch: &Path, dest: &Path, mark
             .map_err(|e| Error::msg(format!("could not extract archive: {e}")))?,
         Archive::TarGz => tar::Archive::new(flate2::read::GzDecoder::new(file)).unpack(scratch)?,
         Archive::TarXz => {
-            let mut tar_bytes = Vec::new();
-            lzma_rs::xz_decompress(&mut std::io::BufReader::new(file), &mut tar_bytes)
-                .map_err(|e| Error::msg(format!("could not decompress archive: {e}")))?;
-            tar::Archive::new(std::io::Cursor::new(tar_bytes)).unpack(scratch)?
+            // Through a file rather than memory: unpacked, MySQL's archive is several hundred MB.
+            let tar_path = scratch.with_extension("tar");
+            let result = (|| {
+                let mut out = std::io::BufWriter::new(std::fs::File::create(&tar_path)?);
+                lzma_rs::xz_decompress(&mut std::io::BufReader::new(file), &mut out)
+                    .map_err(|e| Error::msg(format!("could not decompress archive: {e}")))?;
+                std::io::Write::flush(&mut out)?;
+                drop(out);
+                tar::Archive::new(std::fs::File::open(&tar_path)?).unpack(scratch)?;
+                Ok::<_, Error>(())
+            })();
+            let _ = std::fs::remove_file(&tar_path);
+            result?
         }
     }
 
@@ -715,7 +985,7 @@ pub struct UpdateNotice {
 /// Newer patch releases for installed versions: same "major.minor" line (for example
 /// PHP 8.4.27 → 8.4.30), never a jump to a new minor that could change behaviour.
 pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNotice> {
-    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis]
+    let checks = [Runtime::Apache, Runtime::Nginx, Runtime::Php, Runtime::Mariadb, Runtime::Mailpit, Runtime::Adminer, Runtime::Phpmyadmin, Runtime::Redis, Runtime::Composer, Runtime::Mysql, Runtime::Phpredisadmin, Runtime::Memcached]
         .into_iter()
         .map(|runtime| async move {
             let installed = installed(layout, runtime);
@@ -723,7 +993,6 @@ pub async fn updates(client: &reqwest::Client, layout: &Layout) -> Vec<UpdateNot
                 return Vec::new();
             }
             let Ok(catalog) = available(client, runtime).await else { return Vec::new() };
-            let line = |v: &str| v.split('.').take(2).collect::<Vec<_>>().join(".");
             let mut out = Vec::new();
             for have in &installed {
                 if let Some(newer) = catalog.iter().find(|r| {

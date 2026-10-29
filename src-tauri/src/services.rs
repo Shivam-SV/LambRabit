@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, ffi::OsString, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -33,15 +33,17 @@ pub enum ServiceKind {
     Mariadb,
     /// Catches outgoing mail (SMTP) and shows it in a web inbox.
     Mailpit,
-    /// Redis-compatible cache (Garnet).
+    /// Redis, for caches, sessions and queues.
     Redis,
-    /// Memcached from the system (macOS/Linux).
+    /// Memcached, an in-memory cache.
     Memcached,
+    /// Oracle MySQL, next to MariaDB on its own port.
+    Mysql,
 }
 
 impl ServiceKind {
     pub fn all() -> Vec<Self> {
-        vec![Self::Apache, Self::Nginx, Self::Mariadb, Self::Mailpit, Self::Redis, Self::Memcached]
+        vec![Self::Apache, Self::Nginx, Self::Mariadb, Self::Mysql, Self::Mailpit, Self::Redis, Self::Memcached]
     }
 
     pub fn web_server(self) -> Option<Server> {
@@ -62,6 +64,7 @@ impl ServiceKind {
             Self::Apache => "apache",
             Self::Nginx => "nginx",
             Self::Mariadb => "mariadb",
+            Self::Mysql => "mysql",
             Self::Mailpit => "mailpit",
             Self::Redis => "redis",
             Self::Memcached => "memcached",
@@ -73,6 +76,7 @@ impl ServiceKind {
             Self::Apache => "Apache",
             Self::Nginx => "Nginx",
             Self::Mariadb => "MariaDB",
+            Self::Mysql => "MySQL",
             Self::Mailpit => "Mailpit",
             Self::Redis => "Redis",
             Self::Memcached => "Memcached",
@@ -84,6 +88,7 @@ impl ServiceKind {
             Self::Apache => "apache",
             Self::Nginx => "nginx",
             Self::Mariadb => "mariadb",
+            Self::Mysql => "mysql",
             Self::Mailpit => "mailpit",
             Self::Redis => "redis",
             Self::Memcached => "memcached",
@@ -95,9 +100,10 @@ impl ServiceKind {
             Self::Apache => settings.versions.apache.clone(),
             Self::Nginx => settings.versions.nginx.clone(),
             Self::Mariadb => settings.versions.mariadb.clone(),
+            Self::Mysql => settings.versions.mysql.clone(),
             Self::Mailpit => settings.versions.mailpit.clone(),
             Self::Redis => settings.versions.redis.clone(),
-            Self::Memcached => system_memcached().map(|(_, v)| v),
+            Self::Memcached => settings.versions.memcached.clone(),
         }
     }
 
@@ -106,6 +112,7 @@ impl ServiceKind {
             Self::Apache => layout.etc("apache").join("httpd.conf"),
             Self::Nginx => layout.etc("nginx").join("nginx.conf"),
             Self::Mariadb => layout.etc("mariadb").join("my.ini"),
+            Self::Mysql => layout.etc("mysql").join("my.ini"),
             // Configured on the command line; their data folders.
             Self::Mailpit => layout.data("mailpit"),
             Self::Redis => layout.data("redis"),
@@ -119,6 +126,7 @@ impl ServiceKind {
             Self::Apache => "apache-error.log",
             Self::Nginx => "nginx-error.log",
             Self::Mariadb => "mariadb-error.log",
+            Self::Mysql => "mysql-error.log",
             Self::Mailpit => "mailpit-output.log",
             Self::Redis => "redis-output.log",
             Self::Memcached => "memcached-output.log",
@@ -131,6 +139,7 @@ impl ServiceKind {
             Self::Apache => settings.server_ports(Server::Apache).0,
             Self::Nginx => settings.server_ports(Server::Nginx).0,
             Self::Mariadb => settings.ports.mysql,
+            Self::Mysql => settings.ports.mysql_server,
             Self::Mailpit => settings.ports.mail_smtp,
             Self::Redis => settings.ports.redis,
             Self::Memcached => settings.ports.memcached,
@@ -197,40 +206,7 @@ struct LaunchSpec {
     env: Vec<(&'static str, String)>,
 }
 
-/// Memcached isn't downloadable (no maintained builds for Windows; macOS/Linux users
-/// install it with their package manager), so an installed `memcached` is used.
-pub fn system_memcached() -> Option<(PathBuf, String)> {
-    if cfg!(windows) {
-        return None;
-    }
-    let path = std::env::var_os("PATH")?;
-    let bin = std::env::split_paths(&path)
-        .chain(["/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into()])
-        .map(|d| d.join("memcached"))
-        .find(|p| p.exists())?;
-    let out = std::process::Command::new(&bin).arg("-V").output().ok()?;
-    let version = String::from_utf8_lossy(&out.stdout).split_whitespace().nth(1).unwrap_or("system").to_string();
-    Some((bin, version))
-}
-
 fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<LaunchSpec> {
-    if kind == ServiceKind::Memcached {
-        let (bin, _) = system_memcached().ok_or_else(|| {
-            Error::msg(if cfg!(windows) {
-                "Memcached has no maintained Windows builds."
-            } else {
-                "Install memcached with your package manager (brew install memcached / apt install memcached)."
-            })
-        })?;
-        return Ok(LaunchSpec {
-            cwd: bin.parent().unwrap_or(Path::new("/")).to_path_buf(),
-            program: bin,
-            args: vec!["-l".into(), "127.0.0.1".into(), "-p".into(), settings.ports.memcached.to_string(), "-m".into(), "128".into()],
-            path_prepend: vec![],
-            stop_cmd: None,
-            env: vec![],
-        });
-    }
     let version = kind
         .version(settings)
         .ok_or_else(|| Error::msg(format!("{} is not installed", kind.label())))?;
@@ -240,12 +216,15 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
     let spec = match kind {
         ServiceKind::Apache => LaunchSpec {
             program: home.join("bin").join(exe("httpd")),
-            args: vec![
-                "-d".into(),
-                path(home.clone()),
-                "-f".into(),
-                path(layout.etc("apache").join("httpd.conf")),
-            ],
+            args: {
+                let mut args = vec!["-d".into(), path(home.clone()), "-f".into(), path(layout.etc("apache").join("httpd.conf"))];
+                // Outside Windows httpd forks into the background, and the supervisor would
+                // see it exit while the real server runs on untracked.
+                if !cfg!(windows) {
+                    args.extend(["-D".into(), "FOREGROUND".into()]);
+                }
+                args
+            },
             cwd: home,
             path_prepend: vec![],
             stop_cmd: None,
@@ -256,7 +235,14 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             let conf = path(layout.etc("nginx").join("nginx.conf"));
             LaunchSpec {
                 program: home.join(exe("nginx")),
-                args: vec!["-p".into(), prefix.clone(), "-c".into(), conf.clone()],
+                args: {
+                    let mut args = vec!["-p".into(), prefix.clone(), "-c".into(), conf.clone()];
+                    // Stay in the foreground, as on Windows (see Apache above).
+                    if !cfg!(windows) {
+                        args.extend(["-g".into(), "daemon off;".into()]);
+                    }
+                    args
+                },
                 stop_cmd: Some((home.join(exe("nginx")), vec!["-p".into(), prefix, "-c".into(), conf, "-s".into(), "quit".into()])),
                 cwd: home,
                 path_prepend: vec![],
@@ -278,6 +264,21 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
                 env: vec![],
             }
         }
+        ServiceKind::Mysql => {
+            let defaults = format!("--defaults-file={}", path(layout.etc("mysql").join("my.ini")));
+            let compat = home.join("lib").join("compat");
+            LaunchSpec {
+                program: home.join("bin").join(exe("mysqld")),
+                // --defaults-file must be the first argument; --console keeps errors on
+                // stderr on Windows, where they'd otherwise only go to the event log.
+                args: if cfg!(windows) { vec![defaults.clone(), "--console".into()] } else { vec![defaults.clone()] },
+                stop_cmd: Some((home.join("bin").join(exe("mysqladmin")), vec![defaults, "--user=root".into(), "shutdown".into()])),
+                cwd: home,
+                path_prepend: vec![],
+                // Where the libaio link goes when needed (see configs::mysql_libraries).
+                env: if cfg!(target_os = "linux") { vec![("LD_LIBRARY_PATH", path(compat))] } else { vec![] },
+            }
+        }
         ServiceKind::Mailpit => LaunchSpec {
             program: home.join(exe("mailpit")),
             args: vec![
@@ -296,28 +297,34 @@ fn launch_spec(kind: ServiceKind, settings: &Settings, layout: &Layout) -> Resul
             stop_cmd: None,
             env: vec![],
         },
-        ServiceKind::Redis => {
-            let dotnet = settings
-                .versions
-                .dotnet
-                .as_ref()
-                .map(|v| layout.bin("dotnet", v))
-                .ok_or_else(|| Error::msg("Redis needs the .NET runtime; reinstall Redis from Services to add it."))?;
-            LaunchSpec {
-                program: home.join(exe("GarnetServer")),
-                args: vec![
-                    "--bind".into(),
-                    "127.0.0.1".into(),
-                    "--port".into(),
-                    settings.ports.redis.to_string(),
-                ],
-                cwd: home,
-                path_prepend: vec![],
-                stop_cmd: None,
-                env: vec![("DOTNET_ROOT", path(dotnet))],
-            }
-        }
-        ServiceKind::Memcached => unreachable!("handled above"),
+        // In the foreground, data kept in data/redis. The Windows build is compiled with
+        // MSYS2, which reads C:/… paths; forward slashes avoid escaping trouble there.
+        ServiceKind::Redis => LaunchSpec {
+            program: home.join(exe("redis-server")),
+            args: vec![
+                "--bind".into(),
+                "127.0.0.1".into(),
+                "--port".into(),
+                settings.ports.redis.to_string(),
+                "--dir".into(),
+                path(layout.data("redis")).replace('\\', "/"),
+                "--daemonize".into(),
+                "no".into(),
+            ],
+            cwd: home,
+            path_prepend: vec![],
+            stop_cmd: None,
+            env: vec![],
+        },
+        // Memory only: nothing to keep in data/memcached, which exists for consistency.
+        ServiceKind::Memcached => LaunchSpec {
+            program: home.join(exe("memcached")),
+            args: vec!["-l".into(), "127.0.0.1".into(), "-p".into(), settings.ports.memcached.to_string(), "-m".into(), "128".into()],
+            cwd: home,
+            path_prepend: vec![],
+            stop_cmd: None,
+            env: vec![],
+        },
     };
     Ok(spec)
 }
@@ -349,6 +356,12 @@ async fn prepare(app: &AppHandle, kind: ServiceKind, settings: &Settings, layout
         ServiceKind::Mariadb => {
             configs::write_mariadb(settings, layout)?;
             configs::init_mariadb_data(settings, layout).await?;
+            Ok(vec![])
+        }
+        ServiceKind::Mysql => {
+            configs::mysql_libraries(&configs::mysql_home(settings, layout)?)?;
+            configs::write_mysql(settings, layout)?;
+            configs::init_mysql_data(settings, layout).await?;
             Ok(vec![])
         }
         ServiceKind::Mailpit | ServiceKind::Redis | ServiceKind::Memcached => {
@@ -423,6 +436,31 @@ pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, s
     }
 }
 
+/// Server processes left running from lampRabit's bin/ folder by a previous run that
+/// ended without shutting them down (a crash, or the app being killed). They hold ports
+/// and files, so they're stopped when lampRabit starts. Only one lampRabit runs at a time,
+/// so none of them can belong to another copy. CLI tools (`php`, `mysql`…) that the user
+/// may be running from a terminal are left alone. Returns what was stopped.
+pub fn reap_orphans(layout: &Layout) -> Vec<String> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    const SERVERS: &[&str] = &["httpd", "nginx", "mariadbd", "mysqld", "php-fpm", "php-cgi", "mailpit", "redis-server", "memcached",
+        // Redis before 0.2, so one left running is stopped before its folder is removed.
+        "GarnetServer"];
+    let bin = layout.root().join("bin");
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::Always));
+    let mut stopped = Vec::new();
+    // Threads are listed as processes on Linux; only whole processes are stopped.
+    for (pid, process) in system.processes().iter().filter(|(_, p)| p.thread_kind().is_none()) {
+        let Some(exe) = process.exe() else { continue };
+        let name = exe.file_stem().and_then(|n| n.to_str()).unwrap_or_default();
+        if exe.starts_with(&bin) && SERVERS.contains(&name) && process.kill() {
+            stopped.push(format!("{name} (PID {pid})"));
+        }
+    }
+    stopped
+}
+
 pub fn port_free(port: u16) -> bool {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
     // A test bind alone can succeed on Windows while another program listens on the
@@ -431,7 +469,39 @@ pub fn port_free(port: u16) -> bool {
     if answers((Ipv4Addr::LOCALHOST, port).into()) || answers((Ipv6Addr::LOCALHOST, port).into()) {
         return false;
     }
-    TcpListener::bind(("0.0.0.0", port)).is_ok() && TcpListener::bind(("127.0.0.1", port)).is_ok()
+    // Nobody answered, so "permission denied" only means a privileged port (below 1024 on
+    // Linux), which allow_low_ports deals with; it isn't taken.
+    let bindable = |addr: (&str, u16)| match TcpListener::bind(addr) {
+        Ok(_) => true,
+        Err(e) => e.kind() == std::io::ErrorKind::PermissionDenied,
+    };
+    bindable(("0.0.0.0", port)) && bindable(("127.0.0.1", port))
+}
+
+/// Linux reserves ports below 1024 for root, so a web server on 80/443 needs that limit
+/// lowered. Asked for once (pkexec) and kept in /etc/sysctl.d, so it survives reboots.
+#[cfg(target_os = "linux")]
+async fn allow_low_ports(app: &AppHandle, label: &str, ports: &[u16]) -> Result<()> {
+    const LIMIT: &str = "/proc/sys/net/ipv4/ip_unprivileged_port_start";
+    let Some(lowest) = ports.iter().copied().min() else { return Ok(()) };
+    let limit: u16 = std::fs::read_to_string(LIMIT).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(1024);
+    // SAFETY: geteuid has no preconditions and can't fail.
+    if lowest >= limit || unsafe { libc::geteuid() } == 0 {
+        return Ok(());
+    }
+    logs::system(app, Level::Info, format!("Asking for administrator rights to let {label} use port {lowest}"));
+    let script = format!(
+        "printf '# Lets lampRabit serve sites on standard ports without root.\nnet.ipv4.ip_unprivileged_port_start = {lowest}\n' > /etc/sysctl.d/50-lamprabit.conf && sysctl -q -w net.ipv4.ip_unprivileged_port_start={lowest}"
+    );
+    let allowed = Command::new("pkexec").args(["sh", "-c", &script]).status().await.is_ok_and(|s| s.success());
+    if allowed {
+        logs::system(app, Level::Info, format!("Ports from {lowest} up can now be used without administrator rights"));
+        Ok(())
+    } else {
+        Err(Error::msg(format!(
+            "{label} needs port {lowest}, and Linux only lets administrators use ports below 1024. Allow it when asked, or choose ports above 1024 (such as 8080 and 8443) in Settings → Ports."
+        )))
+    }
 }
 
 fn now_ms() -> u64 {
@@ -518,6 +588,7 @@ impl Supervisor {
                     diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.ports.http)).await
                 }
                 ServiceKind::Mariadb => diagnose::probe_mysql(settings.ports.mysql).await,
+                ServiceKind::Mysql => diagnose::probe_mysql(settings.ports.mysql_server).await,
                 ServiceKind::Nginx => {
                     diagnose::probe_http(client, &format!("http://127.0.0.1:{}/", settings.server_ports(Server::Nginx).0)).await
                 }
@@ -619,6 +690,10 @@ impl Supervisor {
             )));
         }
         let port = kind.port(settings);
+        #[cfg(target_os = "linux")]
+        if kind.web_server().is_some() {
+            allow_low_ports(app, kind.label(), &required_ports(kind, settings, layout)).await?;
+        }
         for p in required_ports(kind, settings, layout) {
             if !port_free(p) {
                 let problem = diagnose::port_problem(kind.label(), p, diagnose::port_owner(p).await);
@@ -741,6 +816,8 @@ impl Supervisor {
         let logs_to_read = [kind.log_path(layout), layout.logs().join(format!("{}-output.log", kind.id()))];
         let app = app.clone();
         let stop_cmd = spec.stop_cmd;
+        // The stop command (mysqladmin, nginx -s quit) needs the same library path.
+        let stop_env = spec.env.clone();
         tauri::async_runtime::spawn(async move {
             let group = group.ok();
             let (state, message) = tokio::select! {
@@ -759,7 +836,7 @@ impl Supervisor {
                     let asked = match &stop_cmd {
                         Some((program, args)) => {
                             let mut c = Command::new(program);
-                            c.args(args).stdout(Stdio::null()).stderr(Stdio::null());
+                            c.args(args).envs(stop_env.iter().map(|(k, v)| (*k, v))).stdout(Stdio::null()).stderr(Stdio::null());
                             procgroup::prepare(&mut c);
                             c.status().await.is_ok_and(|s| s.success())
                         }

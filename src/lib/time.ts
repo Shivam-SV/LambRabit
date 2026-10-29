@@ -24,3 +24,16 @@ export function formatUptime(ms: number) {
 export function formatClock(d: Date) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
+
+/** "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", then the date. */
+export function formatAgo(at: number, now = Date.now()) {
+  const minutes = Math.floor((now - at) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return new Date(at).toLocaleDateString();
+}

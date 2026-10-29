@@ -49,3 +49,15 @@ npx tauri build
 ```
 
 Without the signing key the build still succeeds but warns that updater artifacts can't be signed.
+
+## Own runtime builds (Apache, Nginx, PHP, Redis, Memcached)
+
+Nobody publishes portable Linux or macOS builds of Apache, Nginx or PHP, so lampRabit builds its own, for Linux and macOS (x86_64 and aarch64 each). [.github/workflows/binaries.yml](.github/workflows/binaries.yml) runs the scripts in [build/linux/](build/linux/) and publishes the archives plus `manifest.json` (with a sha256 for each) to a pre-release tagged **`binaries`**. On Linux and macOS, the Services page reads that manifest (and on Windows, for Memcached). It's a pre-release on purpose: GitHub never treats it as "latest", so the app updater keeps finding app releases.
+
+- **macOS** builds run natively on GitHub's macOS runners (`macos-15-intel`, `macos-latest`). Apache's APR libraries get `@rpath` install names and the edited binaries are re-signed ad hoc, which Apple Silicon requires.
+- **Redis** is built core only (no modules, no TLS). Windows uses the community redis-windows build instead (no CI involved). Redis 8 is AGPLv3 among its licence options, so the release notes link the source; 7.2 is BSD.
+- **Memcached** is built from source with libevent compiled in. For Windows, `build-memcached.sh <version> windows` repackages nono303's Cygwin build (GitHub's archive of the tag, checked against `MEMCACHED_WINDOWS_SHA256_x_y_z`) with Memcached's licence and a NOTICE for the Cygwin DLLs. A new Memcached version needs both checksums.
+- **What gets built** is set in [build/linux/versions.env](build/linux/versions.env): Nginx and Apache versions, PHP release lines, and pinned versions and checksums of the libraries compiled in (OpenSSL, PCRE2, zlib, expat, APR). Apache and Nginx are built in Debian 11 (glibc 2.31), so they run on Ubuntu 20.04+, Debian 11+, Fedora 32+ and newer. PHP is built fully static with [static-php-cli](https://github.com/crazywhalecc/static-php-cli), with the extensions listed in `PHP_EXTENSIONS` compiled in (static PHP can't load extensions later, so `redis`, `memcached` and `igbinary` are among them, and the build fails if one is missing).
+- **When it runs:** on pushes to `main` that change `build/linux/`, every Monday (to pick up new PHP patch releases), or by hand from the Actions tab. Builds already in the manifest are skipped; tick "rebuild" to replace them.
+- **New Apache or Nginx version:** edit `versions.env` (for Apache, add its `HTTPD_SHA256_x_y_z` from downloads.apache.org) and push. Older builds stay in the manifest, so existing installs keep working.
+- **Testing builds locally:** run a script on any Linux machine (or WSL), for example `bash build/linux/build-nginx.sh 1.30.6`. Archives land in `out/`. To point the app at them, serve the folder (`python3 build/linux/manifest.py out > out/manifest.json && python3 -m http.server -d out 8000`) and start lampRabit with `LAMPRABIT_BINARIES_URL=http://localhost:8000/`.

@@ -1,26 +1,50 @@
+import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
   AlertTriangle,
-  ExternalLink,
+  Check,
+  Clock,
   Code2,
+  Copy,
+  Database,
+  ExternalLink,
   FolderOpen,
   FolderPlus,
-  SquareTerminal,
+  GitBranch,
   Globe,
+  Hexagon,
   Lock,
   LockOpen,
   RefreshCw,
+  Search,
   ShieldCheck,
+  SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import type { ReactNode } from "react";
-import { api, type Server, type Site } from "../lib/api";
+import { api, serviceLabels, type Server, type Settings, type Site, type SitesInfo } from "../lib/api";
 import { useAppStore } from "../lib/store";
-import { Button, Card, PageHeader, Switch } from "../components/ui";
-import { ShareSite, TunnelsPanel, useTunnels } from "../components/Tunnels";
-import Menu from "../components/Menu";
+import { toolUrl } from "../lib/tools";
+import { formatAgo, useNow } from "../lib/time";
+import { Button, Card, PageHeader, Switch, inputClass } from "../components/ui";
+import { ShareButton, TunnelRow, useProjectTunnel } from "../components/Tunnels";
+
+/** Badge colors per framework; anything else gets the neutral style. */
+const frameworkStyle: Record<string, string> = {
+  Laravel: "bg-red-500/12 text-red-600 dark:text-red-400",
+  WordPress: "bg-sky-600/12 text-sky-700 dark:text-sky-400",
+  Symfony: "bg-zinc-500/15 text-fg",
+  Drupal: "bg-blue-500/12 text-blue-600 dark:text-blue-400",
+  CodeIgniter: "bg-orange-500/12 text-orange-600 dark:text-orange-400",
+  CakePHP: "bg-rose-500/12 text-rose-600 dark:text-rose-400",
+  Yii: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-400",
+  Slim: "bg-teal-500/12 text-teal-700 dark:text-teal-400",
+  PHP: "bg-indigo-500/12 text-indigo-600 dark:text-indigo-400",
+  Static: "bg-surface-2 text-muted",
+};
+
+type Sort = "recent" | "name";
 
 export default function Sites() {
   const queryClient = useQueryClient();
@@ -30,12 +54,15 @@ export default function Sites() {
   const info = useQuery({ queryKey: ["sites"], queryFn: api.listSites, refetchInterval: 10_000 });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sites"] });
+  const [query, setQuery] = useState("");
+  const [framework, setFramework] = useState<string | null>(null);
+  const [sort, setSort] = useState<Sort>("recent");
 
   const apply = useMutation({ mutationFn: api.applySites, onSuccess: refresh, onError });
   const trust = useMutation({
     mutationFn: api.trustCa,
-    onSuccess: () => {
-      notify("info", "Certificate trusted. Restart your browser if it still shows a warning.");
+    onSuccess: (note) => {
+      notify(note ? "error" : "info", note ?? "Certificate trusted. Restart your browser if it still shows a warning.");
       refresh();
     },
     onError,
@@ -43,6 +70,13 @@ export default function Sites() {
 
   const data = info.data;
   const os = paths.data?.os;
+  const all = useMemo(() => data?.sites ?? [], [data]);
+  const frameworks = useMemo(() => [...new Set(all.map((s) => s.framework ?? "Other"))].sort(), [all]);
+  const q = query.trim().toLowerCase();
+  const shown = all
+    .filter((s) => !framework || (s.framework ?? "Other") === framework)
+    .filter((s) => !q || s.name.toLowerCase().includes(q) || s.domain.includes(q) || (s.gitBranch ?? "").toLowerCase().includes(q))
+    .sort((a, b) => (sort === "name" ? a.name.localeCompare(b.name) : b.modified - a.modified));
 
   return (
     <>
@@ -51,7 +85,7 @@ export default function Sites() {
         subtitle={
           <>
             Every folder in <span className="font-mono">www</span> is served at{" "}
-            <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, including sub-domains.
+            <span className="font-mono">&lt;folder&gt;.{data?.tld ?? "test"}</span>, sub-domains included.
           </>
         }
         actions={
@@ -59,7 +93,7 @@ export default function Sites() {
             <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
               <FolderOpen size={16} /> Open www
             </Button>
-            <Button variant="primary" onClick={() => openNewProject(true)}>
+            <Button variant="primary" onClick={() => openNewProject(true)} title="New project (N)">
               <FolderPlus size={16} /> New project
             </Button>
             <Button onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites">
@@ -74,7 +108,7 @@ export default function Sites() {
           <Banner
             icon={RefreshCw}
             tone="info"
-            text="Your sites changed since Apache started. Apply to update domains, certificates and the hosts file."
+            text="Your sites changed since the web server started. Apply to update domains, certificates and the hosts file."
             action={
               <Button variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending}>
                 {apply.isPending ? "Applying…" : "Apply changes"}
@@ -88,7 +122,7 @@ export default function Sites() {
             tone="warn"
             text={
               data.manageHosts
-                ? "Some domains are not in the hosts file yet. This happens automatically when Apache starts, or update it now (needs administrator approval)."
+                ? "Some domains are not in the hosts file yet. This happens automatically when the web server starts, or update it now (needs administrator approval)."
                 : "Some domains are not in the hosts file, and automatic updates are off in Settings."
             }
             action={
@@ -130,59 +164,96 @@ export default function Sites() {
             text={
               <>
                 Browsers will warn on HTTPS sites until you trust lampRabit's local certificate authority.
-                {os === "windows" && " Windows asks you to confirm once."}{" "}
-                <span className="text-muted">Firefox uses its own certificate list; enable "security.enterprise_roots.enabled" there.</span>
+                {os === "windows" && " Windows asks you to confirm once."}
+                {os === "linux" && " Linux asks for your password once; Chrome and Firefox are covered too."}{" "}
+                {os !== "linux" && (
+                  <span className="text-muted">Firefox uses its own certificate list; enable "security.enterprise_roots.enabled" there.</span>
+                )}
               </>
             }
             action={
-              os === "linux" ? (
-                <Button onClick={() => openPath(data.caPath).catch(onError)}>Show certificate</Button>
-              ) : (
-                <Button variant="primary" onClick={() => trust.mutate()} disabled={trust.isPending}>
-                  <ShieldCheck size={16} /> Trust certificate
-                </Button>
-              )
+              <Button variant="primary" onClick={() => trust.mutate()} disabled={trust.isPending}>
+                <ShieldCheck size={16} /> Trust certificate
+              </Button>
             }
           />
         )}
       </div>
 
-      <TunnelsPanel />
-
-      {data?.sites.length === 0 ? (
-        <Card className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-          <div className="flex size-14 items-center justify-center rounded-full bg-accent-soft text-accent-text">
-            <Globe size={26} />
-          </div>
-          <div className="text-lg font-semibold">No sites yet</div>
-          <p className="max-w-md text-muted">
-            Create a folder inside <span className="font-mono">www</span> and put an{" "}
-            <span className="font-mono">index.php</span> in it, or start from a preset.
-          </p>
-          <Button variant="primary" onClick={() => openNewProject(true)}>
-            <FolderPlus size={16} /> New project
-          </Button>
-        </Card>
+      {all.length === 0 ? (
+        data && (
+          <Card className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <div className="flex size-14 items-center justify-center rounded-full bg-accent-soft text-accent-text">
+              <Globe size={26} />
+            </div>
+            <div className="text-lg font-semibold">No sites yet</div>
+            <p className="max-w-md text-muted">
+              Create a folder inside <span className="font-mono">www</span> with an <span className="font-mono">index.php</span>, or start from a
+              preset: Laravel, Symfony, WordPress, a blank PHP or static site.
+            </p>
+            <Button variant="primary" onClick={() => openNewProject(true)}>
+              <FolderPlus size={16} /> New project
+            </Button>
+          </Card>
+        )
       ) : (
-        <div className="motion-stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data?.sites.map((site) => <SiteCard key={site.path} site={site} />)}
-        </div>
+        <>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="relative min-w-56 flex-1 sm:max-w-sm">
+              <Search size={15} className="absolute top-1/2 left-3 -translate-y-1/2 text-muted" aria-hidden />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search projects or branches"
+                aria-label="Search projects"
+                className={clsx(inputClass, "pl-9")}
+              />
+            </div>
+            {frameworks.length > 1 && (
+              <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Framework">
+                {[null, ...frameworks].map((f) => (
+                  <button
+                    key={f ?? "all"}
+                    role="radio"
+                    aria-checked={framework === f}
+                    onClick={() => setFramework(f)}
+                    className={clsx(
+                      "rounded-lg px-2.5 py-1 text-xs font-medium",
+                      framework === f ? "bg-accent text-accent-fg" : "border border-line bg-surface text-muted hover:text-fg",
+                    )}
+                  >
+                    {f ?? "All"}
+                  </button>
+                ))}
+              </div>
+            )}
+            <label className="ml-auto flex items-center gap-2 text-sm text-muted">
+              Sort
+              <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="h-9 rounded-lg border border-line bg-surface px-2 text-sm text-fg">
+                <option value="recent">Recently changed</option>
+                <option value="name">Name</option>
+              </select>
+            </label>
+            <span className="text-sm text-muted" aria-live="polite">
+              {shown.length} of {all.length}
+            </span>
+          </div>
+          {shown.length === 0 ? (
+            <p className="py-10 text-center text-muted">No projects match.</p>
+          ) : (
+            <div className="motion-stagger grid gap-4 xl:grid-cols-2">
+              {shown.map((site) => (
+                <ProjectCard key={site.path} site={site} info={data} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </>
   );
 }
 
-function Banner({
-  icon: Icon,
-  tone,
-  text,
-  action,
-}: {
-  icon: LucideIcon;
-  tone: "info" | "warn";
-  text: ReactNode;
-  action?: ReactNode;
-}) {
+function Banner({ icon: Icon, tone, text, action }: { icon: LucideIcon; tone: "info" | "warn"; text: ReactNode; action?: ReactNode }) {
   return (
     <div
       className={clsx(
@@ -191,19 +262,24 @@ function Banner({
       )}
     >
       <Icon size={20} className={tone === "info" ? "text-accent-text" : "text-warn"} />
-      <p className="min-w-60 flex-1 text-sm">{text}</p>
+      <div className="min-w-60 flex-1 text-sm">{text}</div>
       {action}
     </div>
   );
 }
 
-function SiteCard({ site }: { site: Site }) {
+function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
+  const now = useNow();
   const onError = (e: unknown) => notify("error", String(e));
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
+  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
+  const node = useQuery({ queryKey: ["node"], queryFn: api.nodeStatus, enabled: !!site.node });
+  const tunnel = useProjectTunnel(site);
   const phpVersions = installed.data?.find((i) => i.runtime === "php")?.versions ?? [];
+  const [copied, setCopied] = useState(false);
   const onSuccess = () => {
     for (const key of ["sites", "settings", "services", "php-status"]) queryClient.invalidateQueries({ queryKey: [key] });
   };
@@ -211,93 +287,179 @@ function SiteCard({ site }: { site: Site }) {
   const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
   const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
   const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
-  const tunnel = useTunnels().data?.find((t) => t.site === site.name);
-  const node = useQuery({ queryKey: ["node"], queryFn: api.nodeStatus, enabled: !!site.node });
-  const servesPublic = site.docroot !== site.path;
+  const live = services.data?.some((s) => s.kind === site.server && s.state === "running");
+  const php = site.php ?? settings.data?.versions.php;
+  const nodeMissing = !!site.node && !!node.data?.manager && !node.data.installed.some((v) => v === site.node || v.startsWith(`${site.node}.`));
+  const dbUrl = site.database ? databaseUrl(site.database, info, settings.data) : null;
+  const copyPath = () =>
+    navigator.clipboard.writeText(site.path).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    }, onError);
 
   return (
-    <Card className="flex flex-col gap-4 p-5">
-      <div className="flex items-center gap-3">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-text">
-          <Globe size={20} />
+    <Card className="flex flex-col overflow-hidden">
+      {/* Identity: what it is and whether it's up */}
+      <div className="flex items-start gap-4 px-5 pt-5">
+        <div
+          className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl text-base font-bold", frameworkStyle[site.framework ?? ""] ?? "bg-accent-soft text-accent-text")}
+          aria-hidden
+        >
+          {(site.framework ?? site.name).charAt(0).toUpperCase()}
         </div>
-        <div className="min-w-0">
-          <div className="truncate font-semibold">{site.domain}</div>
-          <div className="selectable flex items-center gap-1 truncate font-mono text-xs text-muted">
-            {site.ssl ? <Lock size={11} className="text-accent-text" /> : <LockOpen size={11} />}
-            {site.url}
-          </div>
-        </div>
-      </div>
-
-      <div className="text-sm text-muted">
-        <div className="selectable truncate" title={site.docroot}>
-          {site.path}
-        </div>
-        {servesPublic && <div className="mt-0.5 text-xs">Serving the public/ folder</div>}
-        {site.node && (
-          <div className="mt-1 text-xs" title="From the project's .nvmrc">
-            Node {site.node}
-            {node.data?.manager && !node.data.installed.some((v) => v === site.node || v.startsWith(`${site.node}.`)) && (
-              <span className="text-warn"> · not installed (Services → Node.js)</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className={clsx("divide-y divide-line rounded-xl bg-surface-2 text-sm", busy && "opacity-60")}>
-        <label className="flex items-center justify-between gap-3 px-3 py-2">
-          <span className="font-medium">PHP</span>
-          <select
-            value={site.php ?? ""}
-            disabled={busy}
-            onChange={(e) => setPhp.mutate(e.target.value || null)}
-            className="min-w-0 rounded-md border border-line bg-surface px-2 py-1 text-sm"
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base leading-tight font-bold">{site.domain}</h2>
+          <button
+            onClick={() => openUrl(site.url).catch(onError)}
+            className="mt-1 flex max-w-full items-center gap-1 font-mono text-xs text-muted hover:text-accent-text"
+            title={`Open ${site.url}`}
           >
-            <option value="">Default ({settings.data?.versions.php ?? "none"})</option>
-            {phpVersions.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        {settings.data?.webServer === "both" && (
+            {site.ssl ? <Lock size={11} className="shrink-0" aria-label="HTTPS" /> : <LockOpen size={11} className="shrink-0" aria-label="HTTP only" />}
+            <span className="truncate">{site.url}</span>
+          </button>
+        </div>
+        <span
+          className={clsx(
+            "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+            live ? "bg-accent-soft text-accent-text" : "bg-surface-2 text-muted",
+          )}
+          title={live ? `Served by ${serviceLabels[site.server]}` : `Start ${serviceLabels[site.server]} to open it`}
+        >
+          <span className={clsx("size-1.5 rounded-full", live ? "bg-ok" : "bg-muted/60")} aria-hidden />
+          {live ? "Live" : "Stopped"}
+        </span>
+      </div>
+
+      {/* One line of what it runs on */}
+      <p className="mt-3 px-5 text-sm text-muted">
+        <span className="font-medium text-accent bg-accent-soft py-1 px-1.5 rounded-full">{site.framework === "PHP" ? "Plain PHP" : (site.framework ?? "Folder")}</span>
+        <span aria-hidden> · </span>PHP {php ?? "—"}
+        <span aria-hidden> · </span>
+        {serviceLabels[site.server]}
+        {site.docroot !== site.path && (
+          <>
+            <span aria-hidden> · </span>serves public/
+          </>
+        )}
+      </p>
+
+      {/* Facts that exist; nothing is listed just to say it's missing */}
+      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 px-5 text-xs text-muted">
+        {site.gitBranch && (
+          <li className="flex items-center gap-1.5" title="Git branch">
+            <GitBranch size={13} aria-hidden /> <span className="font-mono text-fg">{site.gitBranch}</span>
+          </li>
+        )}
+        {site.database && (
+          <li className="flex items-center gap-1.5" title="Database from the project's config">
+            <Database size={13} aria-hidden />
+            {dbUrl ? (
+              <button onClick={() => openUrl(dbUrl).catch(onError)} className="font-mono text-fg hover:text-accent-text hover:underline" title="Open in phpMyAdmin">
+                {site.database}
+              </button>
+            ) : (
+              <span className="font-mono text-fg">{site.database}</span>
+            )}
+          </li>
+        )}
+        {site.node && (
+          <li className="flex items-center gap-1.5" title="Node version from .nvmrc">
+            <Hexagon size={13} aria-hidden /> Node <span className="font-mono text-fg">{site.node}</span>
+            {nodeMissing && <span className="text-warn">(not installed)</span>}
+          </li>
+        )}
+        {site.modified > 0 && (
+          <li className="flex items-center gap-1.5">
+            <Clock size={13} aria-hidden /> Changed {formatAgo(site.modified, now)}
+          </li>
+        )}
+      </ul>
+
+      <button
+        onClick={copyPath}
+        className="group mx-5 mt-3 flex min-w-0 items-center gap-2 rounded-lg bg-surface-2/70 px-3 py-1.5 text-left font-mono text-xs text-muted hover:text-fg"
+        title="Copy folder path"
+      >
+        <FolderOpen size={13} className="shrink-0" aria-hidden />
+        <span className="selectable min-w-0 flex-1 truncate">{site.path}</span>
+        {copied ? <Check size={13} className="shrink-0 text-accent-text" /> : <Copy size={13} className="shrink-0 opacity-0 group-hover:opacity-100" />}
+      </button>
+
+      {tunnel && (
+        <div className="mx-5 mt-3">
+          <TunnelRow tunnel={tunnel} />
+        </div>
+      )}
+
+        <div className={clsx("mx-5 mt-3 divide-y divide-line rounded-xl border border-line text-sm", busy && "opacity-60")}>
           <label className="flex items-center justify-between gap-3 px-3 py-2">
-            <span className="font-medium">Server</span>
+            <span>PHP version</span>
             <select
-              value={site.server}
+              value={site.php ?? ""}
               disabled={busy}
-              onChange={(e) => setServer.mutate(e.target.value as Server)}
-              className="rounded-md border border-line bg-surface px-2 py-1 text-sm"
+              onChange={(e) => setPhp.mutate(e.target.value || null)}
+              className="w-44 rounded-md border border-line bg-surface px-2 py-1 text-sm"
             >
-              <option value="apache">Apache</option>
-              <option value="nginx">Nginx</option>
+              <option value="">Default · {settings.data?.versions.php ?? "none"}</option>
+              {phpVersions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
             </select>
           </label>
-        )}
-        <div className="flex items-center justify-between px-3 py-2">
-          <span className="font-medium">HTTPS</span>
-          <Switch checked={site.ssl} onChange={(v) => toggleSsl.mutate(v)} label={`HTTPS for ${site.domain}`} />
+          {settings.data?.webServer === "both" && (
+            <label className="flex items-center justify-between gap-3 px-3 py-2">
+              <span>Web server</span>
+              <select
+                value={site.server}
+                disabled={busy}
+                onChange={(e) => setServer.mutate(e.target.value as Server)}
+                className="w-44 rounded-md border border-line bg-surface px-2 py-1 text-sm"
+              >
+                <option value="apache">Apache</option>
+                <option value="nginx">Nginx</option>
+              </select>
+            </label>
+          )}
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <span>HTTPS</span>
+            <Switch checked={site.ssl} onChange={(v) => toggleSsl.mutate(v)} label={`HTTPS for ${site.domain}`} />
+          </div>
         </div>
-      </div>
 
-      {tunnel && <ShareSite site={site} tunnel={tunnel} />}
-      <div className="mt-auto flex gap-2">
-        <Button variant="soft" className="flex-1" onClick={() => openUrl(site.url).catch(onError)}>
-          <ExternalLink size={15} /> Open
+      {/* Actions: the main one first, tools next, then sharing and settings */}
+      <div className="mt-auto flex flex-wrap items-center gap-2 px-5 pt-4 pb-5">
+        <Button variant="primary" onClick={() => openUrl(site.url).catch(onError)}>
+          <ExternalLink size={15} /> Open site
         </Button>
-        {!tunnel && <ShareSite site={site} />}
-        <Button onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`}>
-          <FolderOpen size={15} />
+        <Button onClick={() => api.openInEditor(site.path).catch(onError)}>
+          <Code2 size={15} /> Editor
         </Button>
-        <Menu
-          items={[
-            { label: "Open in editor", icon: <Code2 size={15} />, onSelect: () => api.openInEditor(site.path).catch(onError) },
-            { label: "Open terminal here", icon: <SquareTerminal size={15} />, onSelect: () => api.openTerminal(site.path).catch(onError) },
-          ]}
-        />
+        <Button variant="ghost" onClick={() => api.openTerminal(site.path).catch(onError)} aria-label={`Terminal in ${site.name}`} title="Terminal here">
+          <SquareTerminal size={16} />
+        </Button>
+        <Button variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`} title="Open folder">
+          <FolderOpen size={16} />
+        </Button>
+        <span className="flex-1" />
+        {!tunnel && <ShareButton site={site} />}
+        {/* <Button
+          variant={configure ? "soft" : "ghost"}
+          onClick={() => setConfigure((c) => !c)}
+          aria-expanded={configure}
+          aria-label={`Configure ${site.domain}`}
+          title="PHP version, web server, HTTPS"
+        >
+          <SlidersHorizontal size={16} />
+        </Button> */}
       </div>
     </Card>
   );
+}
+
+/** phpMyAdmin opened on the project's database, on the default database server. */
+function databaseUrl(db: string, info?: SitesInfo, settings?: Settings) {
+  const base = toolUrl("phpmyadmin", info, settings?.ports.mailUi);
+  return base ? `${base}?server=1&db=${encodeURIComponent(db)}` : null;
 }

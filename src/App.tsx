@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import clsx from "clsx";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,6 +23,10 @@ import BottomNav from "./components/BottomNav";
 import Titlebar from "./components/Titlebar";
 import Diagnostics from "./components/Diagnostics";
 import NewProject from "./components/NewProject";
+import ShortcutsDialog from "./components/ShortcutsDialog";
+import { useHotkeys } from "./lib/shortcuts";
+import { useStack } from "./lib/stack";
+import type { PageId } from "./lib/store";
 
 function useBackendEvents() {
   const queryClient = useQueryClient();
@@ -71,8 +77,31 @@ function useStartupUpdateCheck() {
   }, []);
 }
 
+const pageKeys: PageId[] = ["overview", "sites", "services", "logs", "settings"];
+
+/** Shortcuts that work on every page (see lib/shortcuts.ts for the full list). */
+function useGlobalShortcuts() {
+  const { navigate, notify, setShortcutsOpen, setNewProjectOpen } = useAppStore.getState();
+  const stack = useStack();
+  const onError = (e: unknown) => notify("error", String(e));
+  useHotkeys({
+    "?": () => setShortcutsOpen(true),
+    ...Object.fromEntries(pageKeys.map((p, i) => [String(i + 1), () => navigate(p)])),
+    "shift+s": () => stack.startStack(),
+    "shift+x": () => stack.stopAll(),
+    n: () => setNewProjectOpen(true),
+    t: () => api.openTerminal(null).catch(onError),
+    w: () =>
+      api
+        .envPaths()
+        .then((p) => openPath(p.www))
+        .catch(onError),
+  });
+}
+
 export default function App() {
   const page = useAppStore((s) => s.page);
+  useGlobalShortcuts();
   useStartupUpdateCheck();
   const scroller = useRef<HTMLDivElement>(null);
   useBackendEvents();
@@ -84,7 +113,10 @@ export default function App() {
     <div className="flex h-full flex-col">
       <Titlebar />
       <div ref={scroller} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-        <main key={page} className="motion-page mx-auto max-w-6xl px-6 pt-8 pb-32 sm:px-10">
+        <main
+          key={page}
+          className={clsx("motion-page mx-auto px-6 pt-8 pb-32 sm:px-10", page === "overview" ? "max-w-[90rem]" : "max-w-6xl")}
+        >
           {page === "overview" && <Overview />}
           {page === "sites" && <Sites />}
           {page === "services" && <Services />}
@@ -96,6 +128,7 @@ export default function App() {
       <Notices />
       <Diagnostics />
       <NewProject />
+      <ShortcutsDialog />
     </div>
   );
 }

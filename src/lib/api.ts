@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit" | "redis" | "memcached";
+export type ServiceKind = "apache" | "nginx" | "mariadb" | "mailpit" | "redis" | "memcached" | "mysql";
 export type WebServer = "apache" | "nginx" | "both";
 export type Server = "apache" | "nginx";
 export type ServiceState = "stopped" | "starting" | "running" | "stopping" | "error";
@@ -15,14 +15,18 @@ export type Runtime =
   | "ngrok"
   | "cloudflared"
   | "redis"
-  | "dotnet";
-export const coreRuntimes: Runtime[] = ["apache", "nginx", "php", "mariadb"];
-export const toolRuntimes: Runtime[] = ["mailpit", "adminer", "phpmyadmin", "redis", "ngrok", "cloudflared"];
+  | "composer"
+  | "mysql"
+  | "phpredisadmin"
+  | "memcached";
+export const coreRuntimes: Runtime[] = ["apache", "nginx", "php", "mariadb", "mysql"];
+export const toolRuntimes: Runtime[] = ["composer", "mailpit", "adminer", "phpmyadmin", "redis", "phpredisadmin", "memcached", "ngrok", "cloudflared"];
 
 export const serviceLabels: Record<ServiceKind, string> = {
   apache: "Apache",
   nginx: "Nginx",
   mariadb: "MariaDB",
+  mysql: "MySQL",
   mailpit: "Mailpit",
   redis: "Redis",
   memcached: "Memcached",
@@ -38,8 +42,11 @@ export const runtimeLabels: Record<Runtime, string> = {
   phpmyadmin: "phpMyAdmin",
   ngrok: "Ngrok",
   cloudflared: "Cloudflare Tunnel",
-  redis: "Redis (Garnet)",
-  dotnet: ".NET runtime",
+  redis: "Redis",
+  composer: "Composer",
+  mysql: "MySQL",
+  phpredisadmin: "phpRedisAdmin",
+  memcached: "Memcached",
 };
 
 export interface UpdateNotice {
@@ -148,13 +155,19 @@ export interface Site {
   url: string;
   modified: number;
   /** Set for built-in tools rather than www/ folders. */
-  tool: "adminer" | "phpmyadmin" | "mailpit" | null;
+  tool: "adminer" | "phpmyadmin" | "phpredisadmin" | "mailpit" | null;
   proxy: string | null;
   /** PHP version chosen for the site; null follows the active version. */
   php: string | null;
   server: Server;
   /** Node version from the project's .nvmrc / .node-version. */
   node: string | null;
+  /** "Laravel", "WordPress", "Symfony", "PHP", "Static"…, from the project's files. */
+  framework: string | null;
+  /** The checked-out git branch (or short commit). */
+  gitBranch: string | null;
+  /** The database the project's config names. */
+  database: string | null;
 }
 
 export interface NodeStatus {
@@ -222,7 +235,7 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mailpit" | "redis" | "memcached" | "system";
+export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
@@ -238,7 +251,10 @@ export interface Settings {
   ports: {
     http: number;
     https: number;
+    /** MariaDB's port (the name predates MySQL support). */
     mysql: number;
+    /** Oracle MySQL, next to MariaDB. */
+    mysqlServer: number;
     phpFpm: number;
     nginxHttp: number;
     nginxHttps: number;
@@ -259,6 +275,25 @@ export interface Settings {
   startServicesOnLaunch: boolean;
   editor: string;
   sites: Record<string, { ssl: boolean | null; php: string | null; server: Server | null }>;
+  profiles: StackProfile[];
+  /** What `mysql`, new projects and the database tools use first. */
+  defaultDatabase: Database;
+}
+
+export type Database = "mariadb" | "mysql";
+
+/** A named set of services started and stopped together. */
+export interface StackProfile {
+  name: string;
+  services: ServiceKind[];
+}
+
+/** CPU (like `top`: 100 is one full core) and memory (bytes) of one service, or "php". */
+export interface Usage {
+  id: ServiceKind | "php";
+  cpu: number;
+  memory: number;
+  processes: number;
 }
 
 export interface EnvPaths {
@@ -306,9 +341,13 @@ export const api = {
   vcRuntimeStatus: () => invoke<{ applicable: boolean; installed: boolean; version: string | null }>("vc_runtime_status"),
   vcRuntimeInstall: () => invoke<void>("vc_runtime_install"),
   setNgrokToken: (token: string | null) => invoke<void>("set_ngrok_token", { token }),
-  trustCa: () => invoke<void>("trust_ca"),
-  openDbClient: () => invoke<void>("open_db_client"),
+  /** Resolves to a note when browsers couldn't be covered (Linux without certutil). */
+  trustCa: () => invoke<string | null>("trust_ca"),
+  openDbClient: (database?: Database) => invoke<void>("open_db_client", { database: database ?? null }),
   startAll: () => invoke<string[]>("start_all"),
+  /** Stops `stop`, then starts `start`; resolves to one message per failed start. */
+  applyServices: (start: ServiceKind[], stop: ServiceKind[]) => invoke<string[]>("apply_services", { start, stop }),
+  serviceUsage: () => invoke<Usage[]>("service_usage"),
   stopAll: () => invoke<void>("stop_all"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
   portStatus: () => invoke<PortStatus[]>("port_status"),

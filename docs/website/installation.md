@@ -1,6 +1,6 @@
 # Installing lampRabit
 
-> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows is fully supported; macOS and Linux are in preview (the app runs, but Apache, Nginx and PHP can't be downloaded there yet; see the table below).
+> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows and Linux are fully supported; macOS is in preview (lampRabit's macOS builds of Apache, Nginx and PHP are new, and MariaDB and MySQL can't be downloaded there yet; see the table below).
 
 ## System requirements
 
@@ -15,10 +15,14 @@
 
 | Runtime | Windows | macOS | Linux |
 |---|---|---|---|
-| Apache | Yes | Coming soon | Coming soon |
-| Nginx | Yes | Coming soon | Coming soon |
-| PHP | Yes (8.1–8.5) | Coming soon | Coming soon |
+| Apache | Yes | Preview (lampRabit's builds) | Yes (lampRabit's builds) |
+| Nginx | Yes | Preview (lampRabit's builds) | Yes (lampRabit's builds) |
+| PHP | Yes (8.1–8.5) | Preview (8.1–8.5, lampRabit's static builds) | Yes (8.1–8.5, lampRabit's static builds) |
 | MariaDB | Yes | Coming soon | Yes |
+| MySQL | Yes | Coming soon | Yes (needs the system's libaio and libnuma; lampRabit names the packages if they're missing) |
+| Composer | Yes | Yes | Yes |
+| Redis (with redis-cli) | Yes (community redis-windows build) | Yes (lampRabit's builds) | Yes (lampRabit's builds) |
+| Memcached | Yes (nono303's build) | Preview (lampRabit's builds) | Yes (lampRabit's builds) |
 | Mailpit, phpMyAdmin, Adminer | Yes | Yes | Yes |
 
 ## Install
@@ -72,7 +76,9 @@
 
 Firefox keeps its own certificate list. To make it trust lampRabit's certificates, open `about:config`, set `security.enterprise_roots.enabled` to `true`, and restart Firefox. Chrome, Edge, Brave and Safari use the system certificate store and work after **Trust certificate**.
 
-On Linux, browsers use various certificate stores; lampRabit shows the certificate file (`ssl/ca/lampRabit-ca.crt`) to import. For the system store: `sudo cp lampRabit-ca.crt /usr/local/share/ca-certificates/lampRabit.crt && sudo update-ca-certificates`.
+On Linux, **Trust certificate** asks for your password once and adds the certificate to the system store. Chrome, Chromium and Firefox keep their own lists, which lampRabit updates too when `certutil` is installed (`sudo apt install libnss3-tools`, or `nss-tools` on Fedora).
+
+On Linux, normal users can't listen on ports below 1024. The first time Apache or Nginx starts on port 80/443, lampRabit asks for your password once and saves the change in `/etc/sysctl.d/50-lamprabit.conf`. To avoid it, use ports above 1024 (such as 8080 and 8443) in Settings → Ports.
 
 ## Ports used
 

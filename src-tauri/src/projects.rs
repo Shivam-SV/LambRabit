@@ -13,11 +13,12 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
-    config::{Server, Settings},
+    config::{Database, Server, Settings},
     configs,
     error::{Error, Result},
     layout::{Layout, exe},
     procgroup,
+    runtimes::{self, Runtime},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,18 +199,21 @@ async fn download(ctx: &Ctx<'_>, url: &str, digest_url: &str, sha1_digest: bool)
     Ok(bytes.to_vec())
 }
 
-/// Composer lives in bin/composer and is downloaded the first time a preset needs it.
+/// The active Composer, or the newest release installed the first time a preset needs it
+/// (the caller makes it the active version afterwards).
 async fn ensure_composer(ctx: &Ctx<'_>) -> Result<PathBuf> {
-    let phar = ctx.layout.root().join("bin").join("composer").join("composer.phar");
-    if phar.exists() {
+    let installed = |v: &str| ctx.layout.bin("composer", v).join("composer.phar");
+    if let Some(phar) = ctx.settings.versions.composer.as_deref().map(installed).filter(|p| p.exists()) {
         return Ok(phar);
     }
-    ctx.step("Downloading Composer");
-    const URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar";
-    let bytes = download(ctx, URL, &format!("{URL}.sha256"), false).await?;
-    std::fs::create_dir_all(phar.parent().unwrap())?;
-    std::fs::write(&phar, bytes)?;
-    Ok(phar)
+    ctx.step("Installing Composer");
+    let release = runtimes::available(ctx.http, Runtime::Composer)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::msg("Couldn't find a Composer download"))?;
+    runtimes::install(ctx.app, ctx.http, ctx.layout, &release).await?;
+    Ok(installed(&release.version))
 }
 
 fn random_string(len: usize) -> String {
@@ -227,14 +231,14 @@ fn random_string(len: usize) -> String {
     out
 }
 
-/// Creates the database (MariaDB must be running).
+/// Creates the database in the default database server (which must be running).
 pub async fn create_database(ctx: &Ctx<'_>, database: &str) -> Result<()> {
-    ctx.step(format!("Creating database {database}"));
-    let home = configs::mariadb_home(ctx.settings, ctx.layout)?;
-    let client = home.join("bin").join(exe("mariadb"));
+    let db = ctx.settings.database().ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?;
+    ctx.step(format!("Creating database {database} in {}", db.label()));
+    let home = configs::database_home(ctx.settings, ctx.layout, db)?;
+    let client = configs::database_client(ctx.settings, ctx.layout, db)?;
     let args = vec![
-        format!("--defaults-file={}", ctx.layout.etc("mariadb").join("my.ini").display()),
-        "--user=root".into(),
+        format!("--defaults-file={}", configs::write_client_config(ctx.settings, ctx.layout, db)?.display()),
         "-e".into(),
         // No IF NOT EXISTS: quietly sharing another project's database (and running its
         // migrations there) is worse than asking for a different name.
@@ -277,7 +281,8 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, url: &str) -> Result<()> {
         return Err(Error::msg("Install PHP first (Services → PHP)."));
     }
     let db = req.database.as_deref();
-    let db_port = ctx.settings.ports.mysql;
+    let server = ctx.settings.database().unwrap_or_default();
+    let db_port = ctx.settings.database_port(server);
 
     match req.preset {
         Preset::Static => {
@@ -327,7 +332,7 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, url: &str) -> Result<()> {
                 ];
                 if let Some(db) = db {
                     values.extend([
-                        ("DB_CONNECTION", "mariadb".to_string()),
+                        ("DB_CONNECTION", server.id().to_string()),
                         ("DB_HOST", "127.0.0.1".into()),
                         ("DB_PORT", db_port.to_string()),
                         ("DB_DATABASE", db.to_string()),
@@ -342,12 +347,14 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, url: &str) -> Result<()> {
                     run(ctx, &php, &args, &dir, Some(&php_dir)).await?;
                 }
             } else {
-                let mariadb = ctx.settings.versions.mariadb.clone().unwrap_or_else(|| "11.8".into());
+                // Doctrine tells the two apart by serverVersion: "11.8.9-MariaDB" or "8.4.13".
+                let version = ctx.settings.database_version(server).cloned().unwrap_or_else(|| "8.0".into());
+                let server_version = if server == Database::Mariadb { format!("{version}-MariaDB") } else { version };
                 let mut values = vec![("MAILER_DSN", format!("smtp://127.0.0.1:{mail_port}"))];
                 if let Some(db) = db {
                     values.push((
                         "DATABASE_URL",
-                        format!("\"mysql://root:@127.0.0.1:{db_port}/{db}?serverVersion={mariadb}-MariaDB&charset=utf8mb4\""),
+                        format!("\"mysql://root:@127.0.0.1:{db_port}/{db}?serverVersion={server_version}&charset=utf8mb4\""),
                     ));
                 }
                 set_env(&dir.join(".env.local"), &values)?;

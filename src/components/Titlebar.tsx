@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Copy, Download, FolderOpen, Minus, Play, Square, SquareTerminal, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Copy, Download, FolderOpen, Keyboard, Minus, Play, Square, SquareTerminal, X } from "lucide-react";
 import clsx from "clsx";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { useAppUpdate } from "../lib/updates";
+import { useStack } from "../lib/stack";
 import Logo from "./Logo";
 import { Button } from "./ui";
 
@@ -18,18 +19,14 @@ import { Button } from "./ui";
 export default function Titlebar() {
   const notify = useAppStore((s) => s.notify);
   const navigate = useAppStore((s) => s.navigate);
+  const page = useAppStore((s) => s.page);
   const update = useAppUpdate((s) => s.available);
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const paths = useQuery({ queryKey: ["paths"], queryFn: api.envPaths });
   const onError = (e: unknown) => notify("error", String(e));
-  const startAll = useMutation({
-    mutationFn: api.startAll,
-    onSuccess: (errors) => errors.forEach((e) => notify("error", e)),
-    onError,
-  });
-  const stopAll = useMutation({ mutationFn: api.stopAll, onError });
-  const anyRunning = services.data?.some((s) => s.state === "running");
+  const stack = useStack();
+  const anyRunning = stack.running.length > 0;
   // On a fresh install there is nothing to start yet; lead to Services instead.
   const nothingInstalled = services.data !== undefined && !services.data.some((s) => s.installed);
 
@@ -50,6 +47,9 @@ export default function Titlebar() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        <Button size="sm" variant="ghost" onClick={() => useAppStore.getState().setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+          <Keyboard size={15} />
+        </Button>
         {update && (
           <button
             onClick={() => navigate("settings")}
@@ -58,14 +58,15 @@ export default function Titlebar() {
             Update {update.version} available
           </button>
         )}
-        <Button size="sm" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data}>
+        <Button size="sm" onClick={() => paths.data && openPath(paths.data.www).catch(onError)} disabled={!paths.data} title="Open www (W)">
           <FolderOpen size={15} /> Open www
         </Button>
-        <Button size="sm" onClick={() => api.openTerminal(null).catch(onError)} aria-label="Open terminal" title="Terminal with php, composer and mariadb">
+        <Button size="sm" onClick={() => api.openTerminal(null).catch(onError)} aria-label="Open terminal" title="Terminal with php, composer and mariadb (T)">
           <SquareTerminal size={15} />
         </Button>
-        {anyRunning ? (
-          <Button size="sm" onClick={() => stopAll.mutate()} disabled={stopAll.isPending}>
+        {/* The Overview has its own (profile-aware) Start and Stop in its header. */}
+        {page === "overview" ? null : anyRunning ? (
+          <Button size="sm" onClick={stack.stopAll} disabled={stack.busy} title="Stop all (Shift+X)">
             <Square size={12} className="fill-current" /> Stop all
           </Button>
         ) : nothingInstalled ? (
@@ -73,8 +74,8 @@ export default function Titlebar() {
             <Download size={14} /> Set up your stack
           </Button>
         ) : (
-          <Button size="sm" variant="primary" onClick={() => startAll.mutate()} disabled={startAll.isPending}>
-            <Play size={14} /> Start all
+          <Button size="sm" variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S">
+            <Play size={14} /> {stack.profile ? `Start ${stack.profile.name}` : "Start all"}
           </Button>
         )}
       </div>

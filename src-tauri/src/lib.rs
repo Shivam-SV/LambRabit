@@ -41,6 +41,9 @@ struct AppState {
     /// Held by anything that starts, stops or reconfigures services, so rapid clicks
     /// (Start all, Stop all, Start all…) run in order and the last one wins.
     ops: Mutex<()>,
+    /// Process table for the dashboard's CPU and memory readings; kept between calls
+    /// because CPU usage is measured from one refresh to the next.
+    processes: std::sync::Mutex<sysinfo::System>,
 }
 
 impl AppState {
@@ -71,7 +74,10 @@ fn active_version(settings: &mut Settings, runtime: Runtime) -> &mut Option<Stri
         Runtime::Ngrok => &mut settings.versions.ngrok,
         Runtime::Cloudflared => &mut settings.versions.cloudflared,
         Runtime::Redis => &mut settings.versions.redis,
-        Runtime::Dotnet => &mut settings.versions.dotnet,
+        Runtime::Composer => &mut settings.versions.composer,
+        Runtime::Mysql => &mut settings.versions.mysql,
+        Runtime::Phpredisadmin => &mut settings.versions.phpredisadmin,
+        Runtime::Memcached => &mut settings.versions.memcached,
     }
 }
 
@@ -83,12 +89,21 @@ fn dependents(runtime: Runtime) -> &'static [ServiceKind] {
         // PHP pools are owned by the web servers; restarting them restarts PHP.
         Runtime::Php => &[ServiceKind::Apache, ServiceKind::Nginx],
         Runtime::Mariadb => &[ServiceKind::Mariadb],
+        Runtime::Mysql => &[ServiceKind::Mysql],
         Runtime::Mailpit => &[ServiceKind::Mailpit],
         // Served by Apache through their own virtual hosts.
-        Runtime::Adminer | Runtime::Phpmyadmin => &[ServiceKind::Apache],
-        // Tunnels start on demand; nothing to restart.
-        Runtime::Ngrok | Runtime::Cloudflared => &[],
-        Runtime::Redis | Runtime::Dotnet => &[ServiceKind::Redis],
+        Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin => &[ServiceKind::Apache],
+        // Tunnels start on demand; Composer runs from the terminal.
+        Runtime::Ngrok | Runtime::Cloudflared | Runtime::Composer => &[],
+        Runtime::Redis => &[ServiceKind::Redis],
+        Runtime::Memcached => &[ServiceKind::Memcached],
+    }
+}
+
+fn database_service(db: config::Database) -> ServiceKind {
+    match db {
+        config::Database::Mariadb => ServiceKind::Mariadb,
+        config::Database::Mysql => ServiceKind::Mysql,
     }
 }
 
@@ -376,6 +391,98 @@ async fn stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     Ok(())
 }
 
+/// Stops `stop`, then starts `start` (installed and enabled ones only), in one go: what
+/// selection actions, stack profiles and Start/Stop all run. Returns one message per
+/// service that failed to start.
+#[tauri::command]
+async fn apply_services(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    start: Vec<ServiceKind>,
+    stop: Vec<ServiceKind>,
+) -> Result<Vec<String>> {
+    let _op = state.ops.lock().await;
+    for &kind in &stop {
+        state.supervisor.stop(&app, kind).await;
+    }
+    for &kind in &stop {
+        state.supervisor.wait_stopped(kind).await;
+    }
+    let (settings, layout) = state.snapshot().await;
+    let mut errors = Vec::new();
+    for info in state.supervisor.list(&settings, &layout).await {
+        if !start.contains(&info.kind) || !info.installed || !info.kind.enabled(&settings) {
+            continue;
+        }
+        if let Err(e) = state.supervisor.start(&app, info.kind, &settings, &layout).await {
+            errors.push(format!("{}: {e}", info.label));
+        }
+    }
+    Ok(errors)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Usage {
+    /// A service id ("apache", "mariadb"…) or "php" for the PHP workers.
+    id: String,
+    /// CPU like `top` shows it: 100 is one full core.
+    cpu: f32,
+    /// Resident memory in bytes.
+    memory: u64,
+    processes: usize,
+}
+
+/// CPU and memory of each running service, counting its child processes (Apache and
+/// Nginx workers), plus PHP's workers as their own entry.
+#[tauri::command]
+async fn service_usage(state: State<'_, AppState>) -> Result<Vec<Usage>> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
+    let (settings, layout) = state.snapshot().await;
+    let roots: Vec<(ServiceKind, u32)> =
+        state.supervisor.list(&settings, &layout).await.into_iter().filter_map(|s| Some((s.kind, s.pid?))).collect();
+    let php_bin = layout.bin("php", "");
+
+    let mut system = state.processes.lock().unwrap_or_else(|e| e.into_inner());
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cpu().with_memory().with_exe(UpdateKind::OnlyIfNotSet),
+    );
+    let mut children: std::collections::HashMap<Pid, Vec<Pid>> = std::collections::HashMap::new();
+    // On Linux every thread is listed too, each with its whole process's memory.
+    let processes = || system.processes().iter().filter(|(_, p)| p.thread_kind().is_none());
+    for (pid, process) in processes() {
+        if let Some(parent) = process.parent() {
+            children.entry(parent).or_default().push(*pid);
+        }
+    }
+    let mut out = Vec::new();
+    for (kind, root) in roots {
+        let mut usage = Usage { id: kind.id().to_string(), cpu: 0.0, memory: 0, processes: 0 };
+        let mut queue = vec![Pid::from_u32(root)];
+        while let Some(pid) = queue.pop() {
+            if let Some(p) = system.process(pid).filter(|p| p.thread_kind().is_none()) {
+                usage.cpu += p.cpu_usage();
+                usage.memory += p.memory();
+                usage.processes += 1;
+            }
+            queue.extend(children.get(&pid).into_iter().flatten().copied());
+        }
+        out.push(usage);
+    }
+    let mut php = Usage { id: "php".into(), cpu: 0.0, memory: 0, processes: 0 };
+    for (_, p) in processes().filter(|(_, p)| p.exe().is_some_and(|e| e.starts_with(&php_bin))) {
+        php.cpu += p.cpu_usage();
+        php.memory += p.memory();
+        php.processes += 1;
+    }
+    if php.processes > 0 {
+        out.push(php);
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 async fn restart_service(app: AppHandle, state: State<'_, AppState>, kind: ServiceKind) -> Result<()> {
     let _op = state.ops.lock().await;
@@ -534,13 +641,15 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
 
     let result = async {
         if let Some(db) = &request.database {
-            if !state.supervisor.is_running(ServiceKind::Mariadb).await {
-                ctx.step("Starting MariaDB");
-                state.supervisor.start(&app, ServiceKind::Mariadb, &settings, &layout).await?;
+            let server = settings.database().ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?;
+            let kind = database_service(server);
+            if !state.supervisor.is_running(kind).await {
+                ctx.step(format!("Starting {}", server.label()));
+                state.supervisor.start(&app, kind, &settings, &layout).await?;
             }
             // The process is up before it accepts connections.
             for _ in 0..30 {
-                if matches!(diagnose::probe_mysql(settings.ports.mysql).await, diagnose::Probe::Ok) {
+                if matches!(diagnose::probe_mysql(settings.database_port(server)).await, diagnose::Probe::Ok) {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -557,7 +666,8 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
         logs::system(&app, logs::Level::Error, format!("Creating project {name} failed: {e}"));
         return Err(e);
     }
-    refresh_shims(&app, &settings); // Composer may have just been installed
+    // Composer may have just been installed; this makes it the active version and adds its shim.
+    state.update_settings(reconcile_versions).await?;
     ctx.step("Adding the site to the web server");
     restart_web_servers(&app, &state).await?;
     logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
@@ -802,13 +912,16 @@ async fn php_status(state: State<'_, AppState>) -> Result<Vec<php::PoolStatus>> 
 
 /// Adds the local CA to the user's trust store (the OS asks for confirmation).
 #[tauri::command]
-async fn trust_ca(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+async fn trust_ca(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>> {
     let (_, layout) = state.snapshot().await;
     *state.ca_trusted.lock().await = None;
     match ssl::trust_ca(&layout).await {
-        Ok(()) => {
+        Ok(note) => {
             logs::system(&app, logs::Level::Info, "Local certificate authority trusted");
-            Ok(())
+            if let Some(note) = &note {
+                logs::system(&app, logs::Level::Warn, note.clone());
+            }
+            Ok(note)
         }
         Err(e) => {
             logs::system(&app, logs::Level::Warn, e.to_string());
@@ -817,25 +930,29 @@ async fn trust_ca(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     }
 }
 
-/// Opens the MariaDB command-line client in a new terminal window.
+/// Opens a database's command-line client in a new terminal window (the default
+/// database when none is named).
 #[tauri::command]
-async fn open_db_client(state: State<'_, AppState>) -> Result<()> {
+async fn open_db_client(state: State<'_, AppState>, database: Option<config::Database>) -> Result<()> {
     let (settings, layout) = state.snapshot().await;
-    let home = configs::mariadb_home(&settings, &layout)?;
-    let client = home.join("bin").join(layout::exe("mariadb"));
-    let defaults = format!("--defaults-file={}", layout.etc("mariadb").join("my.ini").display());
+    let db = database.or(settings.database()).ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?;
+    let home = configs::database_home(&settings, &layout, db)?;
+    let client = configs::database_client(&settings, &layout, db)?;
+    let defaults = format!("--defaults-file={}", configs::write_client_config(&settings, &layout, db)?.display());
     if cfg!(windows) {
         std::process::Command::new("cmd")
-            .args(["/C", "start", "MariaDB"])
+            .args(["/C", "start", db.label()])
             .arg(&client)
-            .args([defaults.as_str(), "--user=root"])
+            .arg(defaults.as_str())
+            .current_dir(&home)
             .spawn()?;
         Ok(())
+    } else if cfg!(target_os = "macos") {
+        Err(Error::msg(format!("Opening a terminal is not supported on this OS yet. Run: {} {defaults}", client.display())))
     } else {
-        Err(Error::msg(format!(
-            "Opening a terminal is not supported on this OS yet. Run: {} {defaults} --user=root",
-            client.display()
-        )))
+        #[cfg(not(windows))]
+        comfort::run_in_terminal(&home, &[client.to_string_lossy().into_owned(), defaults])?;
+        Ok(())
     }
 }
 
@@ -874,7 +991,7 @@ struct PortStatus {
 async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     let (settings, layout) = state.snapshot().await;
     let p = &settings.ports;
-    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached)];
+    let mut ports = vec![("http", p.http), ("https", p.https), ("mysql", p.mysql), ("mysqlServer", p.mysql_server), ("mailSmtp", p.mail_smtp), ("mailUi", p.mail_ui), ("phpFpm", p.php_fpm), ("redis", p.redis), ("memcached", p.memcached)];
     if settings.web_server == config::WebServer::Both {
         ports.extend([("nginxHttp", p.nginx_http), ("nginxHttps", p.nginx_https)]);
     }
@@ -1126,16 +1243,10 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
             }
         })
         .await?;
-    // Garnet (Redis) runs on .NET; install the runtime privately the first time.
-    if release.runtime == Runtime::Redis && state.settings.read().await.versions.dotnet.is_none() {
-        let dotnet = runtimes::available(&state.http, Runtime::Dotnet)
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::msg("Couldn't find a .NET runtime download"))?;
-        logs::system(&app, logs::Level::Info, format!("Installing the .NET {} runtime for Redis", dotnet.version));
-        runtimes::install(&app, &state.http, &layout, &dotnet).await?;
-        state.update_settings(|s| s.versions.dotnet = Some(dotnet.version.clone())).await?;
+    // phpRedisAdmin needs its PHP Redis client next to it.
+    if release.runtime == Runtime::Phpredisadmin {
+        logs::system(&app, logs::Level::Info, "Adding Predis, phpRedisAdmin's Redis client");
+        runtimes::add_predis(&state.http, &layout, &release.version).await?;
     }
     // A new tool brings a domain and, for Mailpit, PHP mail settings: Apache picks both up on restart.
     if activated && is_tool(release.runtime) {
@@ -1145,7 +1256,7 @@ async fn install_runtime(app: AppHandle, state: State<'_, AppState>, release: Re
 }
 
 fn is_tool(runtime: Runtime) -> bool {
-    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin)
+    matches!(runtime, Runtime::Mailpit | Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin)
 }
 
 async fn restart_if_running(app: &AppHandle, state: &AppState, kind: ServiceKind) -> Result<()> {
@@ -1163,7 +1274,7 @@ async fn remove_runtime(app: AppHandle, state: State<'_, AppState>, runtime: Run
     let (mut settings, layout) = state.snapshot().await;
     let was_active = active_version(&mut settings, runtime).as_deref() == Some(version.as_str());
     // Web tools are just files served by Apache, which restarts below instead of blocking.
-    if was_active && !matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin) {
+    if was_active && !matches!(runtime, Runtime::Adminer | Runtime::Phpmyadmin | Runtime::Phpredisadmin) {
         for &kind in dependents(runtime) {
             if state.supervisor.is_running(kind).await {
                 return Err(Error::msg(format!("Stop {} before removing the version it is using", kind.label())));
@@ -1236,6 +1347,9 @@ async fn set_active_version(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first: a second launch hands over to the running copy and exits
+        // before anything else (tray, services, log files) is set up.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1279,6 +1393,7 @@ pub fn run() {
                 warnings.push(format!("lampRabit can't use its environment folder {}: {e}. Choose another one in Settings → General.", settings.root_dir.display()));
             }
             runtimes::clean_removed(&Layout::new(&settings.root_dir));
+            runtimes::migrate_flat_composer(&Layout::new(&settings.root_dir));
             reconcile_versions(&mut settings);
             if tidy_extension_choices(&mut settings) {
                 let _ = settings.save(&settings_path);
@@ -1292,6 +1407,7 @@ pub fn run() {
                 ca_trusted: Mutex::new(None),
                 tunnels: tunnels::Tunnels::default(),
                 ops: Mutex::new(()),
+                processes: std::sync::Mutex::new(sysinfo::System::new()),
             });
             app.manage(logs::LogHub::default());
             {
@@ -1301,6 +1417,21 @@ pub fn run() {
             logs::system(app.handle(), logs::Level::Info, format!("lampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
             for w in &warnings {
                 logs::system(app.handle(), logs::Level::Warn, w.clone());
+            }
+            {
+                let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
+                let leftovers = services::reap_orphans(&Layout::new(&root));
+                if !leftovers.is_empty() {
+                    logs::system(
+                        app.handle(),
+                        logs::Level::Warn,
+                        format!("Stopped services left running by an earlier session: {}", leftovers.join(", ")),
+                    );
+                }
+                // After reaping, so a Garnet left running doesn't keep its files locked.
+                if runtimes::remove_garnet(&Layout::new(&root)) {
+                    warnings.push("Redis is now real Redis on every platform, replacing Garnet. Install it again from Services → Redis; phpRedisAdmin and redis-cli use it automatically.".into());
+                }
             }
             app.manage(StartupWarnings(std::sync::Mutex::new(warnings)));
             if let Ok(settings) = app.state::<AppState>().settings.try_read() {
@@ -1353,6 +1484,8 @@ pub fn run() {
             stop_service,
             start_all,
             stop_all,
+            apply_services,
+            service_usage,
             check_port,
             port_status,
             stop_process,

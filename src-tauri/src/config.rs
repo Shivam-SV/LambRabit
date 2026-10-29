@@ -40,6 +40,49 @@ pub struct Settings {
     pub sites: BTreeMap<String, SiteSettings>,
     /// Extension choices per installed PHP version, on top of the defaults.
     pub php_extensions: BTreeMap<String, ExtensionChoices>,
+    /// Named sets of services to start and stop together ("Laravel", "WordPress"…).
+    pub profiles: Vec<StackProfile>,
+    /// What `mysql`, new projects and the database tools use first.
+    pub default_database: Database,
+}
+
+/// The two MySQL-compatible servers lampRabit runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Database {
+    #[default]
+    Mariadb,
+    Mysql,
+}
+
+impl Database {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Mariadb => "mariadb",
+            Self::Mysql => "mysql",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Mariadb => "MariaDB",
+            Self::Mysql => "MySQL",
+        }
+    }
+
+    pub fn other(self) -> Self {
+        match self {
+            Self::Mariadb => Self::Mysql,
+            Self::Mysql => Self::Mariadb,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StackProfile {
+    pub name: String,
+    pub services: Vec<crate::services::ServiceKind>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -92,6 +135,33 @@ impl Settings {
         }
     }
 
+    pub fn database_version(&self, db: Database) -> Option<&String> {
+        match db {
+            Database::Mariadb => self.versions.mariadb.as_ref(),
+            Database::Mysql => self.versions.mysql.as_ref(),
+        }
+    }
+
+    pub fn database_port(&self, db: Database) -> u16 {
+        match db {
+            Database::Mariadb => self.ports.mysql,
+            Database::Mysql => self.ports.mysql_server,
+        }
+    }
+
+    /// The installed databases, the default one first.
+    pub fn databases(&self) -> Vec<Database> {
+        [self.default_database, self.default_database.other()]
+            .into_iter()
+            .filter(|&d| self.database_version(d).is_some())
+            .collect()
+    }
+
+    /// The default database if it's installed, otherwise the other one if that is.
+    pub fn database(&self) -> Option<Database> {
+        self.databases().first().copied()
+    }
+
     /// The server that also hosts localhost and the developer tools.
     pub fn primary_server(&self) -> Server {
         if self.web_server == WebServer::Nginx { Server::Nginx } else { Server::Apache }
@@ -103,7 +173,10 @@ impl Settings {
 pub struct Ports {
     pub http: u16,
     pub https: u16,
+    /// MariaDB (the name predates MySQL support).
     pub mysql: u16,
+    /// Oracle MySQL, next to MariaDB.
+    pub mysql_server: u16,
     /// First port for PHP FastCGI workers; each PHP version in use takes a block of 10.
     pub php_fpm: u16,
     /// Nginx's ports when it runs next to Apache.
@@ -131,7 +204,10 @@ pub struct Versions {
     pub ngrok: Option<String>,
     pub cloudflared: Option<String>,
     pub redis: Option<String>,
-    pub dotnet: Option<String>,
+    pub composer: Option<String>,
+    pub mysql: Option<String>,
+    pub phpredisadmin: Option<String>,
+    pub memcached: Option<String>,
 }
 
 impl Default for Settings {
@@ -153,6 +229,8 @@ impl Default for Settings {
             editor: "code".into(),
             sites: BTreeMap::new(),
             php_extensions: BTreeMap::new(),
+            profiles: Vec::new(),
+            default_database: Database::Mariadb,
         }
     }
 }
@@ -163,6 +241,7 @@ impl Default for Ports {
             http: 80,
             https: 443,
             mysql: 3306,
+            mysql_server: 3307,
             php_fpm: 9000,
             nginx_http: 8080,
             nginx_https: 8443,
