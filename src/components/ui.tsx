@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import clsx from "clsx";
 
@@ -23,7 +23,7 @@ export function Button({
   size = "md",
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: keyof typeof sizes }) {
+}: ComponentProps<"button"> & { variant?: Variant; size?: keyof typeof sizes }) {
   return (
     <button
       {...props}

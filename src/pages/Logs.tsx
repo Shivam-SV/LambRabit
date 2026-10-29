@@ -13,6 +13,7 @@ const services: { id: LogService | "all"; label: string }[] = [
   { id: "nginx", label: "Nginx" },
   { id: "php", label: "PHP" },
   { id: "mariadb", label: "MariaDB" },
+  { id: "mysql", label: "MySQL" },
   { id: "mailpit", label: "Mailpit" },
   { id: "redis", label: "Redis" },
   { id: "memcached", label: "Memcached" },
@@ -24,6 +25,7 @@ const badge: Record<LogService, { label: string; className: string }> = {
   nginx: { label: "Nginx", className: "bg-emerald-500/20 text-emerald-300" },
   php: { label: "PHP", className: "bg-indigo-500/25 text-indigo-300" },
   mariadb: { label: "MariaDB", className: "bg-amber-500/20 text-amber-300" },
+  mysql: { label: "MySQL", className: "bg-blue-500/20 text-blue-300" },
   mailpit: { label: "Mailpit", className: "bg-sky-500/20 text-sky-300" },
   redis: { label: "Redis", className: "bg-red-500/20 text-red-300" },
   memcached: { label: "Memcached", className: "bg-teal-500/20 text-teal-300" },
@@ -57,7 +59,12 @@ export default function Logs() {
   const clearLogs = useAppStore((s) => s.clearLogs);
   const loadHistory = useAppStore((s) => s.loadHistory);
   const notify = useAppStore((s) => s.notify);
-  const [service, setService] = useState<LogService | "all">("all");
+  const [service, setService] = useState<LogService | "all">(() => {
+    // Opened from a service's "View logs": start filtered to it, once.
+    const focus = useAppStore.getState().logFilter;
+    useAppStore.setState({ logFilter: null });
+    return focus ?? "all";
+  });
   const [confirmClear, setConfirmClear] = useState(false);
   const [loading, setLoading] = useState(true);
 

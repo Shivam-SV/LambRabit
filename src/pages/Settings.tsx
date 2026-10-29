@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   CheckCircle2,
   CircleSlash,
+  Database,
   ExternalLink,
   Feather,
   FolderOpen,
@@ -13,15 +14,18 @@ import {
   Mail,
   Monitor,
   Moon,
+  Palette,
   Plug,
-  ServerCog,
+  Power,
+  RefreshCw,
   Save,
+  ServerCog,
   Settings2,
   Share2,
-  RefreshCw,
   Sparkles,
   Stethoscope,
   Sun,
+  SquareTerminal,
   Wind,
 } from "lucide-react";
 import clsx from "clsx";
@@ -33,28 +37,38 @@ import { installAppUpdate, useAppUpdate } from "../lib/updates";
 import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { runtimeTiles } from "../components/runtimes";
-import { Button, IconTile, PageHeader, SectionCard, Segmented, Switch, inputClass } from "../components/ui";
+import { Button, Card, PageHeader, Segmented, Switch, inputClass } from "../components/ui";
 
 type Os = EnvPaths["os"];
 
 /** `only` limits a field to the platforms where it does anything; `both` to when both web servers run. */
 const portFields: { key: keyof SettingsT["ports"]; label: string; hint: string; only?: Os[]; both?: boolean }[] = [
-  { key: "http", label: "HTTP", hint: "Main web server HTTP port." },
-  { key: "https", label: "HTTPS", hint: "Main web server HTTPS port (SSL)." },
-  { key: "nginxHttp", label: "Nginx HTTP", hint: "Nginx's own HTTP port next to Apache.", both: true },
-  { key: "nginxHttps", label: "Nginx HTTPS", hint: "Nginx's own HTTPS port next to Apache.", both: true },
-  { key: "mysql", label: "MariaDB", hint: "MySQL-compatible database port." },
-  { key: "phpFpm", label: "PHP FastCGI ports", hint: "Start of the range PHP workers use: 10 ports per PHP version." },
-  { key: "redis", label: "Redis", hint: "Redis-compatible cache (Garnet)." },
-  { key: "memcached", label: "Memcached", hint: "System memcached.", only: ["macos", "linux"] },
+  { key: "http", label: "HTTP", hint: "Main web server" },
+  { key: "https", label: "HTTPS", hint: "Main web server, SSL" },
+  { key: "nginxHttp", label: "Nginx HTTP", hint: "Nginx next to Apache", both: true },
+  { key: "nginxHttps", label: "Nginx HTTPS", hint: "Nginx next to Apache", both: true },
+  { key: "mysql", label: "MariaDB", hint: "Database" },
+  { key: "mysqlServer", label: "MySQL", hint: "Database, next to MariaDB" },
+  { key: "phpFpm", label: "PHP FastCGI", hint: "First of 10 ports per PHP version" },
+  { key: "redis", label: "Redis", hint: "Cache and queues" },
+  { key: "memcached", label: "Memcached", hint: "Memory cache" },
 ];
 
-const runtimeHints = (os: Os | undefined): Partial<Record<Runtime, string>> => ({
-  apache: os === "windows" ? "HTTP server (Apache Lounge builds)" : "HTTP server",
-  nginx: "HTTP server (nginx.org builds)",
-  php: "Default for sites without their own version",
-  mariadb: "MySQL-compatible database server",
-});
+/** Settings → section index; ids are the anchors. */
+const sections = [
+  { id: "general", label: "General", icon: Settings2 },
+  { id: "startup", label: "Startup", icon: Power },
+  { id: "terminal", label: "Terminal", icon: SquareTerminal },
+  { id: "web", label: "Web server", icon: ServerCog },
+  { id: "databases", label: "Databases", icon: Database },
+  { id: "versions", label: "Active versions", icon: Layers },
+  { id: "ports", label: "Ports", icon: Plug },
+  { id: "email", label: "Email", icon: Mail },
+  { id: "sharing", label: "Sharing", icon: Share2 },
+  { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "updates", label: "Updates", icon: Sparkles },
+  { id: "help", label: "Troubleshooting", icon: LifeBuoy },
+] as const;
 
 const hostsFile: Record<Os, string> = {
   windows: String.raw`C:\Windows\System32\drivers\etc\hosts`,
@@ -63,6 +77,9 @@ const hostsFile: Record<Os, string> = {
 };
 
 type Versions = Record<Runtime, string | null>;
+
+/** Port and count fields: the input style without its full width. */
+const numberInput = clsx(inputClass.replace("w-full", ""), "w-24 font-mono tabular-nums");
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -77,12 +94,10 @@ export default function Settings() {
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
+  const [current, setCurrent] = useState<string>("general");
 
   const activeVersions = useMemo<Versions | null>(
-    () =>
-      installed.data
-        ? (Object.fromEntries(installed.data.map((i) => [i.runtime, i.active])) as Versions)
-        : null,
+    () => (installed.data ? (Object.fromEntries(installed.data.map((i) => [i.runtime, i.active])) as Versions) : null),
     [installed.data],
   );
 
@@ -93,20 +108,36 @@ export default function Settings() {
     if (activeVersions) setVersions(activeVersions);
   }, [activeVersions]);
 
+  // Highlight the section being read in the index: the last one whose heading has
+  // scrolled past the top third of the window.
+  useEffect(() => {
+    const update = () => {
+      const line = window.innerHeight / 3;
+      let found = "general";
+      document.querySelectorAll<HTMLElement>("section[id^=settings-]").forEach((el) => {
+        if (el.getBoundingClientRect().top <= line) found = el.id.replace("settings-", "");
+      });
+      setCurrent(found);
+    };
+    update();
+    document.addEventListener("scroll", update, true);
+    return () => document.removeEventListener("scroll", update, true);
+  }, [draft !== null]);
+
   const dirty =
     !!draft &&
     !!settings.data &&
-    (JSON.stringify({ ...draft, versions: null, sites: null }) !==
-      JSON.stringify({ ...settings.data, versions: null, sites: null }) ||
+    (JSON.stringify({ ...draft, versions: null, sites: null, profiles: null }) !==
+      JSON.stringify({ ...settings.data, versions: null, sites: null, profiles: null }) ||
       JSON.stringify(versions) !== JSON.stringify(activeVersions));
 
   const save = useMutation({
     mutationFn: async () => {
       if (!draft || !settings.data) return;
-      // Versions are switched separately so running services restart onto them, and
-      // per-site options are owned by the Sites page, so both come from the latest copy.
+      // Versions are switched separately so running services restart onto them; per-site
+      // options and profiles are owned by other screens, so they come from the latest copy.
       const latest = await api.getSettings();
-      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites });
+      await api.saveSettings({ ...draft, versions: latest.versions, sites: latest.sites, profiles: latest.profiles });
       for (const runtime of Object.keys(versions ?? {}) as Runtime[]) {
         const version = versions?.[runtime];
         if (version && version !== activeVersions?.[runtime]) await api.setActiveVersion(runtime, version);
@@ -127,6 +158,9 @@ export default function Settings() {
   };
 
   if (!draft || !versions) return null;
+  const set = (patch: Partial<SettingsT>) => setDraft({ ...draft, ...patch });
+  const setPort = (key: keyof SettingsT["ports"], value: number) => setDraft({ ...draft, ports: { ...draft.ports, [key]: value } });
+  const dbInstalled = { mariadb: !!activeVersions?.mariadb, mysql: !!activeVersions?.mysql };
 
   return (
     <>
@@ -136,176 +170,209 @@ export default function Settings() {
         actions={
           <div className="flex items-center gap-4">
             {dirty ? (
-              <span className="flex items-center gap-2 text-sm text-warn">
+              <span className="flex items-center gap-2 text-sm text-warn" role="status">
                 <span className="size-2 rounded-full bg-warn" /> Unsaved changes
               </span>
             ) : (
-              <span className="flex items-center gap-2 text-sm text-muted">
+              <span className="flex items-center gap-2 text-sm text-muted" role="status">
                 <CheckCircle2 size={17} className="text-accent-text" /> All changes saved
               </span>
             )}
-            <Button size="lg" variant="primary" onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
-              <Save size={17} /> Save changes
+            <Button variant="primary" onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+              <Save size={16} /> Save changes
             </Button>
           </div>
         }
       />
 
-      <div className="motion-stagger grid gap-5 lg:grid-cols-2">
-        <SectionCard icon={<Settings2 size={22} />} title="General" subtitle="Basic configuration for your local environment.">
-          <div className="space-y-5">
-            <Field label="Environment root" hint="Holds runtimes, configs, www, databases and logs.">
+      <div className="grid items-start gap-8 lg:grid-cols-[12rem_minmax(0,1fr)]">
+        <nav aria-label="Settings sections" className="sticky top-4 hidden lg:block">
+          <ul className="space-y-0.5">
+            {sections.map((s) => (
+              <li key={s.id}>
+                <button
+                  onClick={() => document.getElementById(`settings-${s.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  aria-current={current === s.id ? "true" : undefined}
+                  className={clsx(
+                    "flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-sm",
+                    current === s.id ? "bg-accent-soft font-semibold text-accent-text" : "text-muted hover:bg-surface-2 hover:text-fg",
+                  )}
+                >
+                  <s.icon size={15} aria-hidden /> {s.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className="motion-stagger min-w-0 space-y-6">
+          <Section id="general" title="General" subtitle="Where your environment lives and how sites are named.">
+            <Row label="Environment root" hint="Holds runtimes, configs, www, databases and logs." wide>
               <div className="flex gap-2">
-                <input
-                  className={inputClass}
-                  value={draft.rootDir}
-                  onChange={(e) => setDraft({ ...draft, rootDir: e.target.value })}
-                />
+                <input className={inputClass} value={draft.rootDir} onChange={(e) => set({ rootDir: e.target.value })} aria-label="Environment root" />
                 <Button className="h-auto" onClick={browse}>
-                  <FolderOpen size={16} /> Browse…
+                  <FolderOpen size={15} /> Browse…
                 </Button>
               </div>
-            </Field>
-            <Field label="Site domain suffix" hint={`Folders in www/ are served as <name>.${draft.tld || "test"}`}>
+            </Row>
+            <Row label="Site domain suffix" hint={`Folders in www are served as <name>.${draft.tld || "test"}`}>
               <input
-                className={inputClass}
+                className={clsx(inputClass, "font-mono")}
                 value={draft.tld}
-                onChange={(e) => setDraft({ ...draft, tld: e.target.value.replace(/^\.+/, "") })}
+                onChange={(e) => set({ tld: e.target.value.replace(/^\.+/, "") })}
+                aria-label="Site domain suffix"
               />
-            </Field>
-            <Toggle
-              label="HTTPS by default"
-              hint="Sites use HTTPS with a locally trusted certificate unless you turn it off for a site."
-              checked={draft.httpsByDefault}
-              onChange={(v) => setDraft({ ...draft, httpsByDefault: v })}
-            />
-            <Toggle
-              label="Keep running in the tray when closed"
-              hint="Closing the window leaves lampRabit and your services running; quit from the tray icon."
-              checked={draft.closeToTray}
-              onChange={(v) => setDraft({ ...draft, closeToTray: v })}
-            />
-            <AutostartToggle />
-            <Toggle
-              label="Add PHP, Composer and MariaDB to PATH"
-              hint={
-                os === "windows"
-                  ? "Run php, composer, mysql and mariadb-dump from any terminal, always at your active versions. Applies to terminals opened after saving."
-                  : "Adds the shims folder to your shell profile (.zshrc / .bashrc). Applies to terminals opened after saving."
-              }
-              checked={draft.addToPath}
-              onChange={(v) => setDraft({ ...draft, addToPath: v })}
-            />
-            <Toggle
-              label="Start services when lampRabit opens"
-              hint="Starts every installed service, so your sites are up right after you sign in."
-              checked={draft.startServicesOnLaunch}
-              onChange={(v) => setDraft({ ...draft, startServicesOnLaunch: v })}
-            />
-            <Field label="Editor command" hint={'Used by "Open in editor" on site cards: code (VS Code), cursor, phpstorm, subl, zed…'}>
+            </Row>
+            <Row label="Editor command" hint='Used by "Open in editor": code, cursor, phpstorm, subl, zed…'>
               <input
-                className={inputClass}
+                className={clsx(inputClass, "font-mono")}
                 list="editor-presets"
                 value={draft.editor}
-                onChange={(e) => setDraft({ ...draft, editor: e.target.value })}
+                onChange={(e) => set({ editor: e.target.value })}
+                aria-label="Editor command"
               />
               <datalist id="editor-presets">
                 {["code", "cursor", "phpstorm", "subl", "zed", "codium"].map((e) => (
                   <option key={e} value={e} />
                 ))}
               </datalist>
-            </Field>
+            </Row>
+            <ToggleRow
+              label="HTTPS by default"
+              hint="Sites use HTTPS with a locally trusted certificate unless you turn it off for a site."
+              checked={draft.httpsByDefault}
+              onChange={(v) => set({ httpsByDefault: v })}
+            />
             {draft.tld === "localhost" ? (
-              <p className="text-xs text-muted">
-                .localhost domains resolve on their own, so the hosts file is left untouched.
-              </p>
+              <Row label="Hosts file" hint=".localhost domains resolve on their own, so the hosts file is left untouched." />
             ) : (
-              <Toggle
-                label="Update hosts file automatically"
-                hint={`Adds your sites to ${os ? hostsFile[os] : "the hosts file"} when Apache starts. Your system asks for administrator approval when the list changes.`}
+              <ToggleRow
+                label="Update the hosts file automatically"
+                hint={`Adds your sites to ${os ? hostsFile[os] : "the hosts file"} when the web server starts; your system asks for approval when the list changes.`}
                 checked={draft.manageHosts}
-                onChange={(v) => setDraft({ ...draft, manageHosts: v })}
+                onChange={(v) => set({ manageHosts: v })}
               />
             )}
-          </div>
-        </SectionCard>
+          </Section>
 
-        <SectionCard icon={<ServerCog size={22} />} title="Web server" subtitle="Which server runs your sites.">
-          <div className="space-y-5">
-            <Segmented
-              value={draft.webServer}
-              onChange={(webServer) => setDraft({ ...draft, webServer })}
-              className="py-1.5"
-              options={[
-                { value: "apache", label: "Apache" },
-                { value: "nginx", label: "Nginx" },
-                { value: "both", label: "Both" },
-              ]}
+          <Section id="startup" title="Startup" subtitle="What happens when you sign in, open or close lampRabit.">
+            <AutostartToggle />
+            <ToggleRow
+              label="Start services when lampRabit opens"
+              hint="Starts every installed service, so your sites are up right after sign-in."
+              checked={draft.startServicesOnLaunch}
+              onChange={(v) => set({ startServicesOnLaunch: v })}
             />
-            <p className="text-sm text-muted">
-              {draft.webServer === "both"
-                ? `Apache keeps ports ${draft.ports.http}/${draft.ports.https}; Nginx uses ${draft.ports.nginxHttp}/${draft.ports.nginxHttps}. Pick the server for each site on the Sites page.`
-                : draft.webServer === "nginx"
-                  ? "Nginx serves every site. It doesn't read .htaccess files; lampRabit routes unknown URLs to index.php, which suits Laravel, Symfony and WordPress."
-                  : "Apache serves every site and honours .htaccess files, like XAMPP and Laragon."}
-            </p>
+            <ToggleRow
+              label="Keep running in the tray when closed"
+              hint="Closing the window leaves lampRabit and your services running; quit from the tray icon."
+              checked={draft.closeToTray}
+              onChange={(v) => set({ closeToTray: v })}
+            />
+          </Section>
+
+          <Section id="terminal" title="Terminal" subtitle="lampRabit's commands always run your active versions with its config.">
+            <ToggleRow
+              label="Add lampRabit's commands to PATH"
+              hint={
+                os === "windows"
+                  ? "Applies to terminals opened after saving. No administrator rights needed."
+                  : "Adds a marked block to your shell profile (.zshrc / .bashrc); applies to new terminals."
+              }
+              checked={draft.addToPath}
+              onChange={(v) => set({ addToPath: v })}
+            />
+            <Row label="Commands" hint="Also available in the terminal that the title bar's terminal button opens." wide>
+              <div className="flex flex-wrap gap-1.5">
+                {["php", "composer", "mysql", "mysqldump", "mysqladmin", "mariadb", "mariadb-dump", "redis-cli"].map((c) => (
+                  <code key={c} className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-xs">
+                    {c}
+                  </code>
+                ))}
+              </div>
+            </Row>
+          </Section>
+
+          <Section id="web" title="Web server" subtitle="Which server runs your sites.">
+            <Row
+              label="Server"
+              hint={
+                draft.webServer === "both"
+                  ? `Apache keeps ports ${draft.ports.http}/${draft.ports.https}; Nginx uses ${draft.ports.nginxHttp}/${draft.ports.nginxHttps}. Pick a server per site on the Sites page.`
+                  : draft.webServer === "nginx"
+                    ? "Nginx serves every site. It ignores .htaccess; unknown URLs go to index.php, which suits Laravel, Symfony and WordPress."
+                    : "Apache serves every site and honours .htaccess files, like XAMPP and Laragon."
+              }
+            >
+              <Segmented
+                value={draft.webServer}
+                onChange={(webServer) => set({ webServer })}
+                options={[
+                  { value: "apache", label: "Apache" },
+                  { value: "nginx", label: "Nginx" },
+                  { value: "both", label: "Both" },
+                ]}
+              />
+            </Row>
             {os === "windows" && (
-              <Field label="PHP workers per version" hint="Each worker handles one request at a time. 4 suits most projects; raise it for parallel requests.">
+              <Row label="PHP workers per version" hint="Each handles one request at a time. 4 suits most projects; raise it for parallel requests.">
                 <input
                   type="number"
                   min={1}
                   max={10}
-                  className={inputClass}
+                  className={numberInput}
                   value={draft.phpWorkers}
-                  onChange={(e) => setDraft({ ...draft, phpWorkers: Math.max(1, Math.min(10, Number(e.target.value))) })}
+                  onChange={(e) => set({ phpWorkers: Math.max(1, Math.min(10, Number(e.target.value))) })}
+                  aria-label="PHP workers per version"
                 />
-              </Field>
+              </Row>
             )}
-          </div>
-        </SectionCard>
+          </Section>
 
-        <SectionCard icon={<Plug size={22} />} title="Ports" subtitle="Network ports used by local services.">
-          <div className="grid gap-x-5 gap-y-5 sm:grid-cols-2">
-            {portFields
-              .filter((f) => (!f.only || (os && f.only.includes(os))) && (!f.both || draft.webServer === "both"))
-              .map(({ key, label, hint }) => (
-              <Field key={key} label={label} hint={hint}>
-                <input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  className={inputClass}
-                  value={draft.ports[key]}
-                  onChange={(e) => setDraft({ ...draft, ports: { ...draft.ports, [key]: Number(e.target.value) } })}
-                />
-                <PortState
-                  port={draft.ports[key]}
-                  saved={settings.data?.ports[key]}
-                  status={ports.data?.find((p) => p.key === key)}
-                />
-              </Field>
-            ))}
-          </div>
-        </SectionCard>
+          <Section id="databases" title="Databases" subtitle="MariaDB and MySQL can be installed and run side by side.">
+            <Row
+              label="Default database"
+              hint="Used by the mysql, mysqldump and mysqladmin commands, new projects, and listed first in phpMyAdmin and Adminer (which offer both). The mariadb commands always mean MariaDB."
+            >
+              <Segmented
+                value={draft.defaultDatabase}
+                onChange={(defaultDatabase) => set({ defaultDatabase })}
+                options={[
+                  { value: "mariadb", label: dbInstalled.mariadb ? "MariaDB" : "MariaDB (not installed)" },
+                  { value: "mysql", label: dbInstalled.mysql ? "MySQL" : "MySQL (not installed)" },
+                ]}
+              />
+            </Row>
+            {!dbInstalled[draft.defaultDatabase] && (dbInstalled.mariadb || dbInstalled.mysql) && (
+              <p className="px-5 py-3 text-xs text-warn">
+                {draft.defaultDatabase === "mysql" ? "MySQL" : "MariaDB"} isn't installed, so {dbInstalled.mariadb ? "MariaDB" : "MySQL"} is used until it is.
+              </p>
+            )}
+          </Section>
 
-        <SectionCard icon={<Layers size={22} />} title="Active versions" subtitle="Which installed version each service runs.">
-          <div className="space-y-4">
-            {(["apache", "nginx", "php", "mariadb"] as Runtime[])
+          <Section id="versions" title="Active versions" subtitle="Which installed version each service runs. Sites can pick their own PHP.">
+            {(["apache", "nginx", "php", "mariadb", "mysql", "composer"] as Runtime[])
               .filter((r) => (r === "apache" ? draft.webServer !== "nginx" : r === "nginx" ? draft.webServer !== "apache" : true))
               .map((runtime) => {
-              const options = installed.data?.find((i) => i.runtime === runtime)?.versions ?? [];
-              return (
-                <div key={runtime} className="flex items-start gap-4">
-                  <IconTile className={`size-10 rounded-xl ${runtimeTiles[runtime].className}`}>
-                    {runtimeTiles[runtime].icon(20)}
-                  </IconTile>
-                  <div className="w-20 pt-2 font-semibold">{runtimeLabels[runtime]}</div>
-                  <div className="min-w-0 flex-1">
+                const options = installed.data?.find((i) => i.runtime === runtime)?.versions ?? [];
+                return (
+                  <Row
+                    key={runtime}
+                    label={
+                      <span className="flex items-center gap-2.5">
+                        <span className={clsx("flex size-7 items-center justify-center rounded-lg", runtimeTiles[runtime].className)} aria-hidden>
+                          {runtimeTiles[runtime].icon(15)}
+                        </span>
+                        {runtimeLabels[runtime]}
+                      </span>
+                    }
+                  >
                     {options.length > 0 ? (
                       <select
                         className={inputClass}
                         value={versions[runtime] ?? ""}
                         onChange={(e) => setVersions({ ...versions, [runtime]: e.target.value })}
+                        aria-label={`${runtimeLabels[runtime]} version`}
                       >
                         {options.map((v) => (
                           <option key={v}>{v}</option>
@@ -319,159 +386,177 @@ export default function Settings() {
                         Not installed. Install from Services
                       </button>
                     )}
-                    <p className="mt-1 text-xs text-muted">{runtimeHints(os)[runtime]}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </SectionCard>
+                  </Row>
+                );
+              })}
+          </Section>
 
-        <SectionCard
-          icon={<Monitor size={22} />}
-          title="Appearance"
-          subtitle="Choose how lampRabit looks on your device."
-          className="lg:col-span-2"
-        >
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div>
-              <div className="mb-2 text-sm font-medium">Theme</div>
+          <Section id="ports" title="Ports" subtitle="Network ports used by local services. Restart a service to apply a change.">
+            <div className="grid sm:grid-cols-2">
+              {portFields
+                .filter((f) => (!f.only || (os && f.only.includes(os))) && (!f.both || draft.webServer === "both"))
+                .map(({ key, label, hint }) => (
+                  <div key={key} className="flex items-center gap-4 border-b border-line px-5 py-3 sm:odd:border-r">
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor={`port-${key}`} className="block text-sm font-semibold">
+                        {label}
+                      </label>
+                      <PortState port={draft.ports[key]} saved={settings.data?.ports[key]} status={ports.data?.find((p) => p.key === key)} hint={hint} />
+                    </div>
+                    <input
+                      id={`port-${key}`}
+                      type="number"
+                      min={1}
+                      max={65535}
+                      className={numberInput}
+                      value={draft.ports[key]}
+                      onChange={(e) => setPort(key, Number(e.target.value))}
+                    />
+                  </div>
+                ))}
+            </div>
+          </Section>
+
+          <Section id="email" title="Email" subtitle="Mail your apps send lands in Mailpit instead of real inboxes.">
+            {!draft.versions.mailpit && (
+              <Row label="Mailpit" hint="Not installed yet.">
+                <Button size="sm" variant="soft" onClick={() => navigate("services")}>
+                  Install from Services
+                </Button>
+              </Row>
+            )}
+            <ToggleRow
+              label="Send PHP mail() to Mailpit"
+              hint={
+                (os === "windows"
+                  ? "Sets SMTP and smtp_port in php.ini; applies when the web server restarts."
+                  : "Sets sendmail_path to Mailpit's sendmail mode; applies when PHP restarts.") +
+                " Frameworks send over SMTP instead: copy their settings from the Overview's Connect panel."
+              }
+              checked={draft.routeMail}
+              onChange={(v) => set({ routeMail: v })}
+            />
+            <Row label="SMTP port" hint="Where apps send mail.">
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                className={numberInput}
+                value={draft.ports.mailSmtp}
+                onChange={(e) => setPort("mailSmtp", Number(e.target.value))}
+                aria-label="Mailpit SMTP port"
+              />
+            </Row>
+            <Row label="Inbox port" hint="Mailpit's web inbox.">
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                className={numberInput}
+                value={draft.ports.mailUi}
+                onChange={(e) => setPort("mailUi", Number(e.target.value))}
+                aria-label="Mailpit inbox port"
+              />
+            </Row>
+          </Section>
+
+          <SharingSection />
+
+          <Section id="appearance" title="Appearance" subtitle="How lampRabit looks and moves. Applies instantly.">
+            <Row label="Theme" hint="Match your system, or always light or dark.">
               <Segmented
                 value={theme}
                 onChange={setTheme}
-                className="py-1.5"
                 options={[
-                  { value: "system", label: "System", icon: <Monitor size={16} /> },
-                  { value: "light", label: "Light", icon: <Sun size={16} /> },
-                  { value: "dark", label: "Dark", icon: <Moon size={16} /> },
+                  { value: "system", label: "System", icon: <Monitor size={15} /> },
+                  { value: "light", label: "Light", icon: <Sun size={15} /> },
+                  { value: "dark", label: "Dark", icon: <Moon size={15} /> },
                 ]}
               />
-              <p className="mt-3 text-sm text-muted">
-                Automatically match your system theme, or choose a light or dark theme. Applies instantly.
-              </p>
-            </div>
-            <div>
-              <div className="mb-2 text-sm font-medium">Motion</div>
-              <Segmented
-                value={motion}
-                onChange={setMotion}
-                className="py-1.5"
-                options={[
-                  { value: "system", label: "System", icon: <Monitor size={16} /> },
-                  { value: "full", label: "Full", icon: <Wind size={16} /> },
-                  { value: "reduced", label: "Reduced", icon: <Feather size={16} /> },
-                  { value: "off", label: "Off", icon: <CircleSlash size={16} /> },
-                ]}
-              />
-              <p className="mt-3 text-sm text-muted">
-                {motion === "system"
+            </Row>
+            <Row
+              label="Motion"
+              hint={
+                motion === "system"
                   ? "Follows your system's reduce-motion setting."
                   : motion === "full"
                     ? "Transitions, the animated logo and live diagram flows."
                     : motion === "reduced"
                       ? "Gentle fades only: nothing slides, bounces or plays on its own."
-                      : "No animation at all. Loading spinners keep turning so you can tell work is happening."}
-              </p>
-            </div>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          icon={<Mail size={22} />}
-          title="Email testing"
-          subtitle="Mail your apps send lands in Mailpit instead of real inboxes."
-          className="lg:col-span-2"
-        >
-          {!draft.versions.mailpit && (
-            <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-muted">
-              Mailpit isn't installed yet.
-              <Button size="sm" variant="soft" onClick={() => navigate("services")}>
-                Install from Services
-              </Button>
-            </div>
-          )}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-5">
-              <Toggle
-                label="Send PHP mail() to Mailpit"
-                hint={
-                  os === "windows"
-                    ? "Sets SMTP and smtp_port in php.ini. Takes effect when Apache restarts."
-                    : "Sets sendmail_path to Mailpit's sendmail mode. Takes effect when PHP restarts."
-                }
-                checked={draft.routeMail}
-                onChange={(v) => setDraft({ ...draft, routeMail: v })}
+                      : "No animation. Loading spinners keep turning so you can tell work is happening."
+              }
+            >
+              <Segmented
+                value={motion}
+                onChange={setMotion}
+                options={[
+                  { value: "system", label: "System", icon: <Monitor size={15} /> },
+                  { value: "full", label: "Full", icon: <Wind size={15} /> },
+                  { value: "reduced", label: "Reduced", icon: <Feather size={15} /> },
+                  { value: "off", label: "Off", icon: <CircleSlash size={15} /> },
+                ]}
               />
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field label="SMTP port" hint="Where apps send mail.">
-                  <input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    className={inputClass}
-                    value={draft.ports.mailSmtp}
-                    onChange={(e) => setDraft({ ...draft, ports: { ...draft.ports, mailSmtp: Number(e.target.value) } })}
-                  />
-                </Field>
-                <Field label="Inbox port" hint="Mailpit's web interface.">
-                  <input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    className={inputClass}
-                    value={draft.ports.mailUi}
-                    onChange={(e) => setDraft({ ...draft, ports: { ...draft.ports, mailUi: Number(e.target.value) } })}
-                  />
-                </Field>
-              </div>
-            </div>
-            <div className="space-y-3 rounded-xl bg-surface-2 p-4 text-sm">
-              <div className="font-semibold">Two ways apps send mail</div>
-              <p className="text-muted">
-                <span className="font-medium text-fg">Frameworks (Laravel, Symfony, WordPress SMTP plugins)</span> talk SMTP
-                directly. Point them at Mailpit:
-              </p>
-              <pre className="selectable overflow-x-auto rounded-lg bg-bg px-3 py-2 font-mono text-xs">
-                {`MAIL_HOST=127.0.0.1\nMAIL_PORT=${draft.ports.mailSmtp}\nMAIL_USERNAME=null\nMAIL_PASSWORD=null`}
-              </pre>
-              <p className="text-muted">
-                <span className="font-medium text-fg">Plain PHP mail()</span> uses php.ini instead. The switch on the left
-                handles that for you.
-              </p>
-            </div>
-          </div>
-        </SectionCard>
+            </Row>
+          </Section>
 
-        <UpdatesCard
-          checkUpdates={draft.checkUpdates}
-          onCheckUpdatesChange={(v) => setDraft({ ...draft, checkUpdates: v })}
-        />
+          <UpdatesSection checkUpdates={draft.checkUpdates} onCheckUpdatesChange={(v) => set({ checkUpdates: v })} />
 
-        <SharingCard />
-
-        <SectionCard
-          icon={<LifeBuoy size={22} />}
-          title="Troubleshooting"
-          subtitle="When something doesn't start or behaves oddly."
-          className="lg:col-span-2"
-        >
-          <div className="flex flex-wrap items-center gap-4">
-            <p className="min-w-60 flex-1 text-sm text-muted">
-              The diagnostics report collects versions, service health, who is using each port, the Apache config
-              test, hosts and certificate status, and recent errors. Copy it into an issue or keep it for later.
-            </p>
-            <Button variant="primary" onClick={() => openDiagnostics(true)}>
-              <Stethoscope size={16} /> Run diagnostics
-            </Button>
-          </div>
-        </SectionCard>
+          <Section id="help" title="Troubleshooting" subtitle="When something doesn't start or behaves oddly.">
+            <Row
+              label="Diagnostics report"
+              hint="Versions, service health, who uses each port, config tests, hosts and certificate status, and recent errors. Copy it into an issue."
+            >
+              <Button variant="primary" onClick={() => openDiagnostics(true)}>
+                <Stethoscope size={15} /> Run diagnostics
+              </Button>
+            </Row>
+          </Section>
+        </div>
       </div>
     </>
   );
 }
 
-/** Live status under a port field: free, lampRabit's own, or taken by another program. */
-function PortState({ port, saved, status }: { port: number; saved?: number; status?: PortStatus }) {
+/** A settings group: a heading and rows separated by lines. */
+function Section({ id, title, subtitle, children }: { id: string; title: string; subtitle?: string; children: ReactNode }) {
+  return (
+    <section id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} className="scroll-mt-4">
+      <h2 id={`settings-${id}-title`} className="text-base font-bold tracking-tight">
+        {title}
+      </h2>
+      {subtitle && <p className="mt-0.5 text-sm text-muted">{subtitle}</p>}
+      <Card className="mt-3 divide-y divide-line overflow-hidden">{children}</Card>
+    </section>
+  );
+}
+
+/** Label and hint on the left, the control on the right; `wide` puts the control underneath. */
+function Row({ label, hint, wide = false, children }: { label: ReactNode; hint?: string; wide?: boolean; children?: ReactNode }) {
+  return (
+    <div className={clsx("px-5 py-3.5", wide ? "space-y-2.5" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-2")}>
+      <div className="min-w-0 flex-1 basis-64">
+        <div className="text-sm font-semibold">{label}</div>
+        {hint && <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>}
+      </div>
+      {children && <div className={clsx(wide ? "" : "flex w-full shrink-0 sm:w-auto sm:min-w-64 sm:max-w-md sm:justify-end")}>{children}</div>}
+    </div>
+  );
+}
+
+function ToggleRow({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-6 px-5 py-3.5">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold">{label}</div>
+        <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>
+      </div>
+      <Switch checked={checked} onChange={onChange} label={label} />
+    </div>
+  );
+}
+
+/** Live status of a port field: free, lampRabit's own, or taken by another program. */
+function PortState({ port, saved, status, hint }: { port: number; saved?: number; status?: PortStatus; hint: string }) {
   const edited = saved !== undefined && port !== saved;
   const check = useQuery({
     queryKey: ["check-port", port],
@@ -480,73 +565,35 @@ function PortState({ port, saved, status }: { port: number; saved?: number; stat
   });
 
   let tone: "ok" | "muted" | "warn" = "muted";
-  let text: string;
+  let text = hint;
   if (edited) {
-    if (check.data === undefined) return null;
-    tone = check.data ? "ok" : "warn";
-    text = check.data ? "Available" : "In use by another program";
-  } else if (!status) {
-    return null;
-  } else if (status.free) {
+    if (check.data !== undefined) {
+      tone = check.data ? "ok" : "warn";
+      text = check.data ? "Available" : "In use by another program";
+    }
+  } else if (status?.free) {
     tone = "ok";
-    text = "Available";
-  } else if (status.usedByService) {
-    text = `In use by lampRabit (${status.usedByService})`;
-  } else {
+    text = `${hint} · available`;
+  } else if (status?.usedByService) {
+    text = `${hint} · used by ${status.usedByService}`;
+  } else if (status) {
     tone = "warn";
-    text = status.owner ? `In use by ${status.owner.name} (PID ${status.owner.pid})` : "In use by another program";
+    text = status.owner ? `Taken by ${status.owner.name} (PID ${status.owner.pid})` : "Taken by another program";
   }
 
   return (
     <span
-      className={clsx(
-        "mt-1.5 flex items-center gap-1.5 text-xs",
-        tone === "ok" && "text-accent-text",
-        tone === "muted" && "text-muted",
-        tone === "warn" && "text-warn",
-      )}
+      className={clsx("mt-0.5 flex items-center gap-1.5 text-xs", tone === "ok" && "text-muted", tone === "muted" && "text-muted", tone === "warn" && "text-warn")}
       title={status?.owner?.note ?? undefined}
     >
-      <span className={clsx("size-1.5 rounded-full", tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-warn" : "bg-muted/60")} />
-      {text}
+      <span className={clsx("size-1.5 shrink-0 rounded-full", tone === "ok" ? "bg-ok" : tone === "warn" ? "bg-warn" : "bg-muted/60")} />
+      <span className="truncate">{text}</span>
     </span>
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-semibold">{label}</span>
-      {children}
-      {hint && <span className="mt-1.5 block text-xs text-muted">{hint}</span>}
-    </label>
-  );
-}
-
-function Toggle({
-  label,
-  hint,
-  checked,
-  onChange,
-}: {
-  label: string;
-  hint: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <div className="text-sm font-semibold">{label}</div>
-        <div className="mt-0.5 text-xs text-muted">{hint}</div>
-      </div>
-      <Switch checked={checked} onChange={onChange} label={label} />
-    </div>
-  );
-}
-
 /** Ngrok's authtoken lives in the system keychain, never in lampRabit's files. */
-function SharingCard() {
+function SharingSection() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
   const saved = useQuery({ queryKey: ["ngrok-token"], queryFn: api.ngrokTokenSaved });
@@ -562,47 +609,38 @@ function SharingCard() {
   });
 
   return (
-    <SectionCard icon={<Share2 size={22} />} title="Sharing" subtitle="Put a site on a public URL for testing webhooks or showing a client." className="lg:col-span-2">
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="space-y-3">
-          <div className="text-sm font-semibold">Ngrok authtoken</div>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              className={inputClass}
-              placeholder={saved.data ? "Saved. Paste a new one to replace it" : "Paste your token"}
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              autoComplete="off"
-            />
-            <Button variant="primary" className="h-auto" onClick={() => save.mutate(token)} disabled={!token.trim() || save.isPending}>
-              Save
+    <Section id="sharing" title="Sharing" subtitle="Put a project on a public URL to test webhooks or show a client. Share from a project's card on the Sites page.">
+      <Row
+        label="Ngrok authtoken"
+        hint={`${saved.data ? "A token is saved in your system keychain. " : ""}Ngrok needs a free account: dashboard.ngrok.com → Your Authtoken. The free plan gives one random URL at a time.`}
+        wide
+      >
+        <div className="flex gap-2">
+          <input
+            type="password"
+            className={inputClass}
+            placeholder={saved.data ? "Saved. Paste a new one to replace it" : "Paste your token"}
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            autoComplete="off"
+            aria-label="Ngrok authtoken"
+          />
+          <Button variant="primary" className="h-auto" onClick={() => save.mutate(token)} disabled={!token.trim() || save.isPending}>
+            Save
+          </Button>
+          {saved.data && (
+            <Button className="h-auto" onClick={() => save.mutate(null)} disabled={save.isPending}>
+              Remove
             </Button>
-            {saved.data && (
-              <Button className="h-auto" onClick={() => save.mutate(null)} disabled={save.isPending}>
-                Remove
-              </Button>
-            )}
-          </div>
-          <p className="text-xs text-muted">
-            {saved.data ? "A token is saved in your system keychain. " : ""}
-            Ngrok needs a free account; copy the token from dashboard.ngrok.com → Your Authtoken. The free plan gives
-            one random URL at a time.
-          </p>
+          )}
         </div>
-        <div className="space-y-2 rounded-xl bg-surface-2 p-4 text-sm">
-          <div className="font-semibold">Cloudflare quick tunnels</div>
-          <p className="text-muted">
-            Need no account or token: install Cloudflare Tunnel from Services and use the share button on a site. Each
-            tunnel gets a random trycloudflare.com address that lasts until you stop it.
-          </p>
-        </div>
-      </div>
-    </SectionCard>
+      </Row>
+      <Row label="Cloudflare quick tunnels" hint="No account or token: install Cloudflare Tunnel from Services. Each share gets a random trycloudflare.com address until you stop it." />
+    </Section>
   );
 }
 
-function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boolean; onCheckUpdatesChange: (v: boolean) => void }) {
+function UpdatesSection({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boolean; onCheckUpdatesChange: (v: boolean) => void }) {
   const notify = useAppStore((s) => s.notify);
   const version = useQuery({ queryKey: ["app-version"], queryFn: getVersion });
   const { available, checking, error, checked, checkNow } = useAppUpdate();
@@ -619,30 +657,30 @@ function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boo
     }
   };
 
+  const status = available ? (
+    <span className="font-semibold text-accent-text">
+      Version {available.version} is available.{" "}
+      <button
+        className="inline-flex items-center gap-1 font-normal hover:underline"
+        onClick={() => openUrl(`https://github.com/Shivam-SV/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
+      >
+        What's new <ExternalLink size={12} />
+      </button>
+    </span>
+  ) : checking ? (
+    "Checking for updates…"
+  ) : error ? (
+    error
+  ) : checked ? (
+    "You're on the latest version."
+  ) : (
+    "Updates are signed and installed in place; your environment is kept."
+  );
+
   return (
-    <SectionCard icon={<Sparkles size={22} />} title="Updates" subtitle={`lampRabit ${version.data ?? ""}`} className="lg:col-span-2">
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="min-w-60 flex-1 text-sm">
-          {available ? (
-            <>
-              <div className="font-semibold text-accent-text">Version {available.version} is available</div>
-              <button
-                className="mt-1 inline-flex items-center gap-1 text-accent-text hover:underline"
-                onClick={() => openUrl(`https://github.com/Shivam-SV/LampRabit/releases/tag/v${available.version}`).catch(() => {})}
-              >
-                What's new in {available.version} <ExternalLink size={13} />
-              </button>
-            </>
-          ) : checking ? (
-            <span className="text-muted">Checking for updates…</span>
-          ) : error ? (
-            <span className="text-muted">{error}</span>
-          ) : checked ? (
-            <span className="text-muted">You're on the latest version.</span>
-          ) : (
-            <span className="text-muted">Updates are signed and installed in place; your environment is kept.</span>
-          )}
-        </div>
+    <Section id="updates" title="Updates" subtitle={`lampRabit ${version.data ?? ""}`}>
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
+        <div className="min-w-0 flex-1 basis-64 text-sm text-muted">{status}</div>
         {available ? (
           <Button variant="primary" onClick={install} disabled={progress !== undefined}>
             {progress === undefined ? "Install and restart" : progress === null ? "Downloading…" : `Downloading ${progress}%`}
@@ -653,15 +691,13 @@ function UpdatesCard({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: boo
           </Button>
         )}
       </div>
-      <div className="mt-4">
-        <Toggle
-          label="Check when lampRabit starts"
-          hint="Looks for a new release on GitHub; nothing is downloaded until you choose to install."
-          checked={checkUpdates}
-          onChange={onCheckUpdatesChange}
-        />
-      </div>
-    </SectionCard>
+      <ToggleRow
+        label="Check when lampRabit starts"
+        hint="Looks for a new release on GitHub; nothing is downloaded until you choose to install."
+        checked={checkUpdates}
+        onChange={onCheckUpdatesChange}
+      />
+    </Section>
   );
 }
 
@@ -671,7 +707,7 @@ function AutostartToggle() {
   const enabled = useQuery({ queryKey: ["autostart"], queryFn: isAutostartEnabled });
   const queryClient = useQueryClient();
   return (
-    <Toggle
+    <ToggleRow
       label="Start lampRabit when I sign in"
       hint="Opens in the tray, out of the way. Applies immediately."
       checked={!!enabled.data}

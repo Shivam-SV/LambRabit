@@ -44,13 +44,34 @@ pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result
             std::process::Command::new("osascript").args(["-e", &script, "-e", "tell application \"Terminal\" to activate"]).spawn()?;
             return Ok(());
         }
-        for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"] {
-            if std::process::Command::new(term).current_dir(dir).env("PATH", &path).spawn().is_ok() {
-                return Ok(());
-            }
-        }
-        Err(Error::msg("No terminal emulator found."))
+        // GNOME's terminals start shells from a background server that never sees our
+        // environment, so PATH goes in through `env` as part of the command.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        run_in_terminal(dir, &["env".to_string(), format!("PATH={}", path.to_string_lossy()), shell])
     }
+}
+
+/// Runs `command` in a new terminal window (Linux and other Unix desktops), trying the
+/// usual terminal emulators in turn.
+#[cfg(not(windows))]
+pub fn run_in_terminal(dir: &Path, command: &[String]) -> Result<()> {
+    let terminals: [(&str, &[&str]); 9] = [
+        ("x-terminal-emulator", &["-e"]),
+        ("ptyxis", &["--new-window", "--"]),
+        ("gnome-terminal", &["--"]),
+        ("kgx", &["--"]),
+        ("konsole", &["-e"]),
+        ("xfce4-terminal", &["-x"]),
+        ("alacritty", &["-e"]),
+        ("kitty", &[]),
+        ("xterm", &["-e"]),
+    ];
+    for (term, run) in terminals {
+        if std::process::Command::new(term).args(run).args(command).current_dir(dir).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+    Err(Error::msg("No terminal emulator found. Install one such as gnome-terminal, konsole or xterm."))
 }
 
 /// Opens a folder in the configured editor command (VS Code's `code` by default).

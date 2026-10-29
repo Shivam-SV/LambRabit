@@ -32,7 +32,7 @@ pub struct Site {
     pub url: String,
     /// Unix time in milliseconds of the folder's last modification.
     pub modified: u64,
-    /// Set for built-in tools (adminer, phpmyadmin, mailpit) rather than www/ folders.
+    /// Set for built-in tools (adminer, phpmyadmin, phpredisadmin, mailpit) rather than www/ folders.
     pub tool: Option<&'static str>,
     /// Forward requests to this local URL instead of serving files.
     pub proxy: Option<String>,
@@ -41,6 +41,75 @@ pub struct Site {
     pub server: Server,
     /// Node version from the project's .nvmrc / .node-version.
     pub node: Option<String>,
+    /// What the project is built with ("Laravel", "WordPress"…), from its files.
+    pub framework: Option<&'static str>,
+    /// The checked-out git branch (or short commit when detached).
+    pub git_branch: Option<String>,
+    /// The database the project's config names (Laravel/Symfony .env, wp-config.php).
+    pub database: Option<String>,
+}
+
+/// Framework, git branch and database name of a project, read from a few small files.
+fn project_info(dir: &Path) -> (Option<&'static str>, Option<String>, Option<String>) {
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).ok();
+    let composer = read("composer.json").unwrap_or_default();
+    let requires = |pkg: &str| composer.contains(&format!("\"{pkg}\""));
+    let framework = if dir.join("artisan").exists() || requires("laravel/framework") {
+        Some("Laravel")
+    } else if dir.join("wp-config.php").exists() || dir.join("wp-login.php").exists() {
+        Some("WordPress")
+    } else if requires("symfony/framework-bundle") || dir.join("symfony.lock").exists() {
+        Some("Symfony")
+    } else if requires("drupal/core") || requires("drupal/core-recommended") {
+        Some("Drupal")
+    } else if requires("codeigniter4/framework") {
+        Some("CodeIgniter")
+    } else if requires("cakephp/cakephp") {
+        Some("CakePHP")
+    } else if requires("yiisoft/yii2") {
+        Some("Yii")
+    } else if requires("slim/slim") {
+        Some("Slim")
+    } else if !composer.is_empty() || dir.join("index.php").exists() || dir.join("public/index.php").exists() {
+        Some("PHP")
+    } else if dir.join("index.html").exists() || dir.join("public/index.html").exists() {
+        Some("Static")
+    } else {
+        None
+    };
+
+    let git_branch = read(".git/HEAD").and_then(|head| {
+        let head = head.trim();
+        match head.strip_prefix("ref: refs/heads/") {
+            Some(branch) => Some(branch.to_string()),
+            None => head.get(..7).map(str::to_string),
+        }
+    });
+
+    // `KEY=value` from a .env file, without quotes.
+    let env_value = |text: &str, key: &str| {
+        text.lines()
+            .find_map(|l| l.trim().strip_prefix(&format!("{key}=")))
+            .map(|v| v.trim().trim_matches(['"', '\'']).to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let database = match framework {
+        Some("Laravel") => read(".env").and_then(|t| env_value(&t, "DB_DATABASE")),
+        Some("WordPress") => read("wp-config.php").and_then(|t| {
+            let at = t.find("'DB_NAME'").or_else(|| t.find("\"DB_NAME\""))?;
+            let rest = &t[at + 9..];
+            let start = rest.find(['\'', '"'])? + 1;
+            let end = rest[start..].find(['\'', '"'])?;
+            Some(rest[start..start + end].to_string()).filter(|d| !d.is_empty() && d != "database_name_here")
+        }),
+        _ => [".env.local", ".env"]
+            .iter()
+            .filter_map(|f| read(f))
+            .find_map(|t| env_value(&t, "DATABASE_URL"))
+            .and_then(|url| url.split('?').next().and_then(|u| u.rsplit('/').next()).map(str::to_string))
+            .filter(|d| !d.is_empty() && !d.contains(':')),
+    };
+    (framework, git_branch, database)
 }
 
 /// Folder name → DNS label: lowercase letters, digits and dashes. Common accented letters
@@ -172,6 +241,9 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
             php: None,
             server,
             node: None,
+            framework: None,
+            git_branch: None,
+            database: None,
         });
     };
     if let Some(ver) = &v.adminer {
@@ -179,6 +251,9 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
     }
     if let Some(ver) = &v.phpmyadmin {
         add("phpmyadmin", "phpmyadmin", Some(layout.bin("phpmyadmin", ver)), None);
+    }
+    if let Some(ver) = &v.phpredisadmin {
+        add("phpredisadmin", "phpredisadmin", Some(layout.bin("phpredisadmin", ver)), None);
     }
     if v.mailpit.is_some() {
         add("mailpit", "mail", None, Some(format!("http://127.0.0.1:{}/", settings.ports.mail_ui)));
@@ -214,6 +289,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             let php = own.and_then(|s| s.php.clone());
             let server = site_server(settings, &name);
             let node = crate::node::project_version(&path);
+            let (framework, git_branch, database) = project_info(&path);
             let modified = e
                 .metadata()
                 .and_then(|m| m.modified())
@@ -233,6 +309,9 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 php,
                 server,
                 node,
+                framework,
+                git_branch,
+                database,
             })
         })
         .collect();
@@ -631,6 +710,9 @@ mod tests {
             php: None,
             server: Server::Apache,
             node: None,
+            framework: None,
+            git_branch: None,
+            database: None,
         }
     }
 

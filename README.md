@@ -4,14 +4,14 @@
 
 # lampRabit
 
-**A fast, friendly local PHP development environment.** Ready on Windows; macOS and Linux in preview.
+**A fast, friendly local PHP development environment.** Ready on Windows and Linux; macOS in preview.
 
 Apache or Nginx, PHP, MariaDB and the tools around them, with one click. Every folder in `www` becomes `https://<folder>.test`.
 
 [![Latest release](https://img.shields.io/github/v/release/Shivam-SV/LampRabit?label=download&color=59d1a2)](https://github.com/Shivam-SV/LampRabit/releases/latest)
 [![CI](https://github.com/Shivam-SV/LampRabit/actions/workflows/ci.yml/badge.svg)](https://github.com/Shivam-SV/LampRabit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-1b2028)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20(preview)%20%7C%20Linux%20(preview)-1b2028)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20(preview)-1b2028)
 
 [**Website**](https://shivam-sv.github.io/LampRabitWebsite/) · [**Download**](https://github.com/Shivam-SV/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md)
 
@@ -25,7 +25,7 @@ If you've used XAMPP or Laragon, you know the idea: a local web stack you don't 
 
 ## Features
 
-- **One-click stack.** Apache and/or Nginx, PHP, MariaDB, Mailpit, a Redis-compatible cache and Memcached. Runtimes download on demand, checksum-verified, and you can keep several versions installed.
+- **One-click stack.** Apache and/or Nginx, PHP, MariaDB, Mailpit, Redis and Memcached. Runtimes download on demand, checksum-verified, and you can keep several versions installed.
 - **Sites without configuration.** `www/my-app` is served at `my-app.test`, with `public/` detection, sub-domains and the hosts file kept in sync.
 - **HTTPS by default.** A local certificate authority issues trusted certificates for every site; turn it off per site if you like.
 - **Per-site choices.** PHP version, web server and HTTPS for each site. In the terminal, `php` and `composer` follow the site's PHP version too.
@@ -57,20 +57,22 @@ Get the latest version from the [**Releases page**](https://github.com/Shivam-SV
 | Windows 10/11 (64-bit) | `…_x64-setup.exe` (recommended) or `…_x64_en-US.msi` | Ready |
 | macOS, Apple Silicon | `…_aarch64.dmg` | Preview |
 | macOS, Intel | `…_x64.dmg` | Preview |
-| Linux, Debian/Ubuntu | `…_amd64.deb` | Preview |
-| Linux, other distributions | `…_amd64.AppImage` | Preview |
+| Linux, Debian/Ubuntu | `…_amd64.deb` | Ready |
+| Linux, other distributions | `…_amd64.AppImage` | Ready |
 
 ### Platform support
 
-On **Windows**, everything above works today. On **macOS and Linux** the app runs, but Apache, Nginx and PHP can't be downloaded from it yet; that's the main thing being worked on next.
+On **Windows and Linux**, everything above works today. Linux gets lampRabit's own builds of Apache, Nginx, PHP, Redis and Memcached, so you choose versions the same way as on Windows. On **macOS** the app runs and the same builds are being added (preview); MariaDB and MySQL aren't downloadable there yet.
 
 | Runtime | Windows | macOS | Linux |
 |---|---|---|---|
-| Apache, Nginx, PHP | ✅ | Coming soon | Coming soon |
-| MariaDB | ✅ | Coming soon | ✅ |
+| Apache, Nginx, PHP | ✅ | Preview | ✅ |
+| MariaDB, MySQL | ✅ | Coming soon | ✅ |
+| Composer | ✅ | ✅ | ✅ |
 | phpMyAdmin, Adminer | ✅ | With Apache and PHP | With Apache and PHP |
-| Mailpit, Redis-compatible cache (Garnet), Cloudflare/ngrok tunnels | ✅ | ✅ | ✅ |
-| Memcached | Not available | Uses your installed memcached | Uses your installed memcached |
+| Redis, with redis-cli | ✅ (community redis-windows build) | ✅ | ✅ |
+| Mailpit, phpRedisAdmin, Cloudflare/ngrok tunnels | ✅ | ✅ | ✅ |
+| Memcached | ✅ (nono303's build) | Preview | ✅ |
 
 > [!NOTE]
 > Builds aren't code-signed yet. On Windows, click **More info → Run anyway**. On macOS, open **System Settings → Privacy & Security** and click **Open Anyway**. Full steps are in the [installation guide](docs/website/installation.md).

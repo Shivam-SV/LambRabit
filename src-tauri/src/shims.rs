@@ -5,13 +5,20 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    config::Settings,
+    config::{Database, Settings},
     configs,
     error::{Error, Result},
     layout::{exe, Layout},
 };
 
-const MARIADB_TOOLS: &[&str] = &["mariadb", "mysql", "mariadb-dump", "mysqldump", "mariadb-admin", "mysqladmin"];
+/// (shim name, MariaDB program, MySQL program). `mariadb*` always mean MariaDB; the
+/// `mysql*` names follow Settings → Default database.
+const DB_TOOLS: &[(&str, &str, &str)] = &[
+    ("mysql", "mariadb", "mysql"),
+    ("mysqldump", "mariadb-dump", "mysqldump"),
+    ("mysqladmin", "mariadb-admin", "mysqladmin"),
+];
+const MARIADB_TOOLS: &[&str] = &["mariadb", "mariadb-dump", "mariadb-admin"];
 
 pub fn dir(layout: &Layout) -> PathBuf {
     layout.root().join("shims")
@@ -35,26 +42,38 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
     php_cases.extend(settings.versions.php.as_ref().and_then(|v| php_case(settings, layout, v, None)));
     if php_cases.iter().any(|c| c.folder.is_none()) {
         shim(&dir, "php", &php_cases)?;
-        let phar = layout.root().join("bin").join("composer").join("composer.phar");
-        if phar.exists() {
+        let phar = settings.versions.composer.as_ref().map(|v| layout.bin("composer", v).join("composer.phar"));
+        if let Some(phar) = phar.filter(|p| p.exists()) {
             for case in &mut php_cases {
                 case.args.push(path(&phar));
             }
             shim(&dir, "composer", &php_cases)?;
         }
     }
-    if let Some(v) = &settings.versions.mariadb {
-        let bin = layout.bin("mariadb", v).join("bin");
-        // Picks up the [client] port and socket, so the tools reach lampRabit's server.
-        let my_ini = layout.etc("mariadb").join("my.ini");
-        let args: Vec<String> =
-            if my_ini.exists() { vec![format!("--defaults-extra-file={}", path(&my_ini))] } else { Vec::new() };
-        for name in MARIADB_TOOLS {
-            let target = bin.join(exe(name));
-            if target.exists() {
-                shim(&dir, name, &[Case { folder: None, target, args: args.clone() }])?;
+    // The tools read host, port and user from client.cnf, so they reach lampRabit's
+    // server as root without any options.
+    let db_tool = |db: Database, program: &str| -> Option<Case> {
+        let target = configs::database_home(settings, layout, db).ok()?.join("bin").join(exe(program));
+        let cnf = configs::write_client_config(settings, layout, db).ok()?;
+        target.exists().then(|| Case { folder: None, target, args: vec![format!("--defaults-extra-file={}", path(&cnf))] })
+    };
+    for name in MARIADB_TOOLS {
+        if let Some(case) = db_tool(Database::Mariadb, name) {
+            shim(&dir, name, &[case])?;
+        }
+    }
+    if let Some(db) = settings.database() {
+        for (name, mariadb, mysql) in DB_TOOLS {
+            if let Some(case) = db_tool(db, if db == Database::Mariadb { mariadb } else { mysql }) {
+                shim(&dir, name, &[case])?;
             }
         }
+    }
+    // redis-cli from the active Redis, pointed at lampRabit's port.
+    let cli = settings.versions.redis.as_ref().map(|v| layout.bin("redis", v).join(exe("redis-cli")));
+    if let Some(target) = cli.filter(|t| t.exists()) {
+        let args = vec!["-p".to_string(), settings.ports.redis.to_string()];
+        shim(&dir, "redis-cli", &[Case { folder: None, target, args }])?;
     }
     Ok(dir)
 }

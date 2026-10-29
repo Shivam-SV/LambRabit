@@ -8,9 +8,9 @@ A Laragon/XAMPP-style local dev environment built with Tauri v2 (Rust) and React
 |---|---|
 | Platforms | Windows, macOS and Linux from day one; OS-specific code is isolated behind `cfg` |
 | Binaries | Downloaded on demand from a per-OS version manifest, sha256-verified |
-| MVP stack | Apache + PHP + MariaDB |
+| MVP stack | Apache + PHP + MariaDB (MySQL added in phase 9) |
 | PHP integration | Windows: thread-safe PHP loaded into Apache as `mod_php`. macOS/Linux: `php-fpm` + `mod_proxy_fcgi` |
-| Binary sources | Windows: Apache Lounge, windows.php.net, mariadb.org. macOS/Linux: static-php-cli builds for PHP, official MariaDB tarballs, Apache from our own builds (fallback: system package manager) |
+| Binary sources | Windows: Apache Lounge, nginx.org, windows.php.net, mariadb.org, MySQL CDN. Linux: lampRabit's own CI builds of Apache, Nginx and PHP (`build/linux/`), official MariaDB and MySQL tarballs. macOS: still to do |
 | Frontend | React 19, TypeScript, Vite, Tailwind v4, TanStack Query, Zustand |
 
 ## Environment layout (default `C:\lampRabit` / `~/lampRabit`)
@@ -31,6 +31,192 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [x] **7. Comfort and PHP tooling** (see below)
 - [x] **8. Release**: installers (NSIS/MSI, dmg, AppImage/deb), signed auto-updates, CI on every push, tag-triggered draft releases (see RELEASING.md)
 - [x] **Polish**: animated logo (ears, eyes, nose every few minutes), page/dialog/list motion, Motion setting (System / Full / Reduced / Off)
+- [x] **9. Linux parity and developer dashboard** (see below)
+- [ ] **10. macOS parity, stability on every OS, safe uninstall**
+- [ ] **11. Caddy and FrankenPHP**
+- [ ] **12. Projects: several domains, processes, Node.js serving**
+- [ ] **13. Logs redesign and dump catcher**
+- [ ] **14. Movable tab bar**
+- [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, backups**
+- [ ] **16. More services: search, storage, queues, n8n, Ollama**
+- [ ] **17. Templates and more frameworks**
+- [ ] **18. Onboarding**
+- [ ] **19. Project doctor**
+- [ ] **20. Headless core and the `lamprabit` CLI**
+- [ ] **21. MCP server**
+- [ ] **22. Git**
+- [ ] **23. Dependency manager**
+- [ ] **Later**: Git workflow builder, deployment checklists, recording setups as templates, other language runtimes
+
+## Product evolution (decided 2026-10-29)
+
+Phases 10 and up come from an exported product spec (`Preject-features-and-plan.md`), checked against the code. About a third of it already existed: the supervisor, Apache/Nginx, PHP per project, extensions, MariaDB/MySQL, Redis, profiles and the dashboard. The decisions below are the maintainer's answers to the points where the spec was unclear or contradicted earlier decisions.
+
+| Topic | Decision |
+|---|---|
+| Order | Stable on all three OSes first (macOS builds), then all services (web servers, databases, extra services), then project tooling; CLI/MCP and Git/dependency panels come last |
+| FrankenPHP and Caddy | Brought back (reverses 7.3): both become web servers next to Apache and Nginx |
+| In-app database manager | Not now. Adminer, phpMyAdmin and phpRedisAdmin stay the database UIs; Redis stays on phpRedisAdmin |
+| "DD and dump catcher" | PHP `dump()` / `dd()` output is caught and shown in the Logs tab, which is redesigned with better filters and options |
+| Uninstall | Keeps `www/` (projects) and `data/` (databases) and removes everything else lampRabit created |
+| Docking | No dockable panels; only the tab bar can be moved to the bottom, top, left or right |
+| CLI | Works whether or not the app is open. The CLI and the window show exactly the same state, because both talk to one backend process |
+| `lamprabit.toml` in projects | Only if a feature needs it (phase 12 decides) |
+| Reference | FlyEnv (github.com/xpf0000/FlyEnv) covers many of the same services; check how it gets binaries and configures each service before designing one here. Check its licence before copying any code or templates |
+
+## Phase 10: macOS parity, stability on every OS, safe uninstall
+
+macOS was in preview because only Redis, Mailpit, ngrok, cloudflared and Composer had macOS downloads; Apache, Nginx, PHP, MariaDB and MySQL had none.
+
+### 10.1 macOS runtimes, Redis and Memcached (scripts done 2026-10-29, first CI run pending)
+- Compared with FlyEnv and EnvKit first. FlyEnv uses the same Windows sources as lampRabit, but on Linux/macOS it takes static-php-cli's prebuilt PHP (months behind), a stale third-party Nginx, and Homebrew/system packages for Apache, Redis and Memcached; EnvKit is closed source and bundles everything (Windows and Apple Silicon only). Decision: keep building our own, extended to macOS.
+- ✅ `binaries.yml` builds Apache, Nginx, PHP, Redis and Memcached for Linux and macOS, x86_64 and aarch64 each (macOS: `@rpath` for APR, ad hoc re-signing, no file AIO), and repackages Memcached for Windows. The app reads Apache/Nginx/PHP from the manifest on macOS too.
+- ✅ Real Redis on Windows (community redis-windows build) instead of Garnet + .NET; `redis-cli` comes with it; Garnet installs from 0.1 are removed on start. Verified locally: Windows path with spaces for `--dir`, `INFO keyspace`, saving.
+- ✅ Memcached as a downloadable runtime everywhere (was: system install on Linux/macOS, nothing on Windows). Verified locally: Windows build (set/get/version) and the Linux build (links only glibc).
+- ✅ PHP `memcached` + `igbinary`: compiled into the Linux/macOS builds (the build fails if missing), and the `memcached` PECL download in the Windows extension manager.
+- ⏳ Push and watch the first CI run; test the macOS builds on a Mac (Apache, Nginx, PHP-FPM, Redis, Memcached), then mark macOS out of preview for those.
+- ⏳ MariaDB ships no macOS tarballs: build it in CI too (heavy, cache aggressively), or use a detected Homebrew install. Spike both. MySQL publishes macOS tarballs (add to `mysql_releases`).
+### 10.2 macOS platform pieces
+- Hosts file and CA trust (`security add-trusted-cert`, an admin prompt), ports below 1024 (macOS allows them unprivileged since Mojave, but verify), terminal launcher (Terminal.app / iTerm), shims on PATH (`~/.zprofile`), process groups, `reap_orphans`.
+- Gatekeeper: downloaded runtimes carry `com.apple.quarantine`; remove it after the checksum check.
+- A macOS CI job that installs and starts each runtime (smoke test), like the existing checks.
+### 10.3 Stability on all OSes
+- A cross-platform smoke test: install runtime → start → health probe → stop, for every service, on Windows, Linux and macOS in CI.
+- A compatibility matrix (runtime × OS × arch, with the reason when one isn't available) in the docs, generated from the catalogs where possible.
+### 10.4 Uninstall
+- Removes `bin/`, `etc/`, `logs/`, `tmp/`, `ssl/`, the settings and app data, the managed hosts-file block, the local CA's trust entry, and the shims' PATH entries. Keeps `www/` and `data/`.
+- Before removing, stop running services and `reap_orphans`, so no file is in use.
+- Windows: NSIS uninstall hook (`installer.nsh`). Linux/macOS have no uninstaller hook (AppImage, dmg), so add a "Remove lampRabit's files" action in Settings that does the same and says what it keeps; the NSIS hook can call the same code (`lamprabit --uninstall-cleanup`).
+- Never delete outside the environment folder; list what will be removed before doing it.
+
+## Phase 11: Caddy and FrankenPHP
+
+Both become web servers next to Apache and Nginx: `WebServer`/`Server` gain variants, each site picks its server when more than one is enabled, and each extra server gets its own ports (existing logic for "both").
+- **Caddy**: single binary from GitHub releases (all three OSes). lampRabit writes a Caddyfile: one site block per site, `php_fastcgi` to the existing PHP pools (so per-site PHP and the extension manager keep working), `reverse_proxy` for proxied sites/tools, `tls <cert> <key>` with lampRabit's CA and `auto_https off` so Caddy doesn't create a second CA. `caddy validate` before start (like `httpd -t`), `caddy reload` when sites change.
+- **FrankenPHP**: the assessment from 7.3 still applies. It embeds its own PHP, so its version is shown read-only and its built-in extensions are listed; php.ini through `PHP_INI_SCAN_DIR` (Mailpit settings). Worker mode is an opt-in per-site toggle with a "restart workers" action. Intel Macs: no build, so the UI says so.
+- Spike first on Windows (newest FrankenPHP platform): start, our certificates, extensions, `.user.ini`.
+- Health probe, port conflicts, logs and the diagnostics report cover both.
+
+## Phase 12: projects (several domains, processes, Node.js)
+
+The groundwork for most later phases. A project stays a folder in `www/`; `SiteSettings` gains optional fields, so existing settings need no migration:
+
+```toml
+[sites.shop]
+php = "8.3"
+ssl = true
+
+[[sites.shop.domains]]       # extra domains: to a folder, or to one of the processes
+host = "admin.shop.test"
+root = "admin/public"
+
+[[sites.shop.domains]]
+host = "api.shop.test"
+process = "api"
+
+[[sites.shop.processes]]     # long-running commands
+name = "api"
+command = "npm run dev"
+port = 3000                  # or "auto": a free port, passed as $PORT
+env = { NODE_ENV = "development" }
+restart = "on-failure"
+```
+
+- Domains render through the existing vhost code (Apache, Nginx, Caddy), which already proxies for tools (`Site.proxy`). Before writing configs, check for duplicate hosts, ports in use and missing roots.
+- Processes run under the supervisor with `procgroup`, with PATH set like the shims so `php`, `composer` and `node` are lampRabit's. Start/stop/restart one or all, restart policy, health (does the port answer), crash causes via `diagnose::explain_exit`.
+- Node.js projects: detect `package.json` and the package manager from the lockfile (npm, pnpm, yarn, bun), suggest the `dev` script as the web process, use the `.nvmrc` version. A Node site is a process plus a proxied domain; the router knows nothing about Node.
+- Stack profiles can include project processes.
+- Project detail view (open from the card): domains, processes with their logs, quick actions.
+- `lamprabit.toml` in the project folder (same shape, committable) only if sharing setups through the repo turns out to be needed; settings.toml would override it.
+
+## Phase 13: logs redesign and dump catcher
+
+- **Sources**: every service, every project process (phase 12; `LogLine.service` becomes an owned name like `shop/queue`), PHP errors, web-server access/error logs, and dumps.
+- **Dump catcher**: PHP `dump()` and `dd()` appear in Logs as their own source, with the project, file:line, time and a collapsible tree of the value. Route: an `auto_prepend_file` in the generated php.ini sets Symfony VarDumper's server mode (`VAR_DUMPER_FORMAT=server`, `VAR_DUMPER_SERVER=127.0.0.1:<port>`), and lampRabit listens on that port. The dump-server payload is PHP-serialized, so spike the decoding: a small PHP receiver that re-emits JSON, or a lampRabit dumper class set as the handler. A setting decides whether dumps still show in the page too. Plain `var_dump` can't be intercepted; the UI says that.
+- **Redesign**: source list (services, projects → processes, dumps) next to the stream; filters for level, source, time range and text (regex optional); highlighted matches; pause/follow; virtualised list so large logs don't block the UI; click a line for context (surrounding lines, full text, copy); export the filtered view; per-source clear.
+- **Retention**: size cap per log file and total, configurable in Settings; old files rotated.
+- Errors that need action (fatal, failed start) are highlighted; warnings aren't treated as failures.
+
+## Phase 14: movable tab bar
+
+The page tab bar (`BottomNav`) can sit at the bottom (default), top, left or right: a setting, plus dragging the bar to an edge with a drop preview. Vertical positions stack the tabs and move the page content aside. The position is saved per device, `Escape`/a reset action puts it back, and it never ends up off-screen. Check both themes, Motion settings, and the full-width wrapper pitfall (`pointer-events-none`).
+
+## Phase 15: more databases
+
+- **PostgreSQL**: EnterpriseDB binary zips on Windows and macOS; Linux from lampRabit's CI builds (same reasoning as 9.2). Data folder per major version (`data/postgres-17`), `initdb` on first start, port 5432, `psql`/`pg_dump` shims, `client` config like MariaDB's, Adminer lists it, new projects can choose it (`.env` lines, `pdo_pgsql` enabled).
+- **MongoDB**: official tarballs (all three OSes, check arch), `mongosh` downloaded with it, a `mongodb` PHP extension through the extension manager, connection string on the Overview.
+- **SQLite**: no server. New projects can choose it (create `database/database.sqlite`, write `.env`); presets offer it where the framework supports it.
+- **Backups**: dump and restore per database (`mysqldump`/`mariadb-dump`, `pg_dump`, `mongodump`, file copy for SQLite) into `backups/`, with a restore picker.
+- No in-app database browser (decided 2026-10-29).
+
+## Phase 16: more services
+
+Same standards as existing runtimes: catalog per OS/arch with checksums, data under `data/`, health probe, logs, ports in Settings, connection details on the Overview, `.test` domain for web UIs, data kept on upgrade/remove. Resource needs (RAM, Java, Erlang) shown before installing. Rough order, cheapest first:
+1. Meilisearch, Typesense (single binaries)
+2. MinIO (single binary, console at `minio.test`)
+3. n8n (an npm package run on lampRabit's Node; data in `data/n8n`; needs Node installed first)
+4. OpenSearch / Elasticsearch (bundled JDK, 1 GB+ RAM)
+5. RabbitMQ (needs Erlang; Windows support to be checked)
+6. Ollama (detect an existing install first; often installed by the user)
+
+## Phase 17: templates and more frameworks
+
+- The hard-coded `Preset` enum becomes declarative, versioned templates (built in plus a user folder): variables with defaults and validation, prerequisites (PHP ≥, extensions, Node, a database), steps (`composer create-project`, commands, `.env` keys, create database, domains/processes from phase 12, git init), live output, cleanup on failure. The five current presets are ported first, behaving the same.
+- New: CakePHP, CodeIgniter 4, Drupal, Statamic; Vite (React/Vue/Svelte), Next.js, Express API; Laravel + Vite. Magento last, with a requirements check (Adobe auth keys, OpenSearch from phase 16, memory).
+- The project records which template and version created it.
+
+## Phase 18: onboarding
+
+First-run wizard: what lampRabit does, a starter (PHP, Laravel, WordPress, Node.js, full stack, custom), each component with download size and platform notes, install with progress and retry, optionally create a first project. Already-installed runtimes are detected and skipped. Stack profiles gain export/import. Can be re-opened from Settings.
+
+## Phase 19: project doctor
+
+Built on `diagnose.rs`. Per project: PHP version vs `composer.json`, missing extensions, `vendor/` or `node_modules` missing or out of date with the lockfile, missing `.env` or unreachable database, certificate expiry, hosts entry, port conflicts, invalid vhost/domain config. Each issue: what, why, affected project/service, the fix, whether it can be applied automatically, and a preview before applying. Nothing is upgraded, deleted or overwritten without confirmation.
+
+## Phase 20: headless core and the `lamprabit` CLI
+
+- One backend process owns the services. The app can run without a window (tray only, `--background`); the window and the CLI are both clients of it, so they always show the same state.
+- `lamprabit` (installed as a shim like `php`) connects over a local socket / named pipe with a token in the app data folder. If no backend is running, it starts one in the background. Opening the app later attaches to the same backend (the single-instance plugin already routes a second launch).
+- Commands: `status`, `service start|stop|restart`, `project list|start|stop|open`, `runtime list|install|use|remove`, `logs [--follow] [--source]`, `doctor`, `profile`, `config`. `--json` everywhere, stable exit codes, `--yes`/`--dry-run` for destructive actions.
+- Commands reuse the Tauri command code paths (no second implementation): split the bodies in `lib.rs` into functions both call.
+
+## Phase 21: MCP server
+
+`lamprabit mcp` (stdio) on top of the phase 20 backend: list projects, services and their health, read filtered logs and dumps, run the doctor, start/stop, create a project from a template, git status. Read-only tools by default; tools that change things are marked so the client asks first; credentials and keys are never returned, only connection metadata.
+
+## Phase 22: Git
+
+Through the `git` CLI, so the user's credential helpers and SSH keys work: status, stage/unstage, commit, branches (create, switch, rename, delete), history with diffs, fetch/pull/push, merge conflicts listed, clone into `www/`, remotes. Per-repository identity editor (`git config --local user.name/email`), never changing global config unless asked.
+
+## Phase 23: dependency manager
+
+Composer and npm/pnpm/yarn/bun panels per project: installed and outdated packages, install/update/require/remove with live output, run with the project's PHP and Node versions. No upgrades without consent; lockfile kept consistent.
+
+## Phase 9: Linux parity and developer dashboard
+
+### 9.1 Fixes
+- Single instance: a second launch brings the running window forward (tauri-plugin-single-instance).
+- Composer is a runtime on the Services page: install, switch and remove versions (current and 2.2 LTS); presets install it when needed.
+- Linux: the AppImage aborted on systems without libGLESv2 (fixed with `WEBKIT_DISABLE_DMABUF_RENDERER=1`); Apache and Nginx daemonized and went untracked (now run in the foreground); services left behind by a crash are stopped on the next launch.
+
+### 9.2 Linux runtimes (decided: lampRabit's own CI builds)
+Apache, Nginx and PHP are built by `.github/workflows/binaries.yml` from `build/linux/` and published to the `binaries` release with a checksummed manifest (details in RELEASING.md). Distro packages were considered and rejected: one PHP version only, per-distro paths and service conflicts. Ports 80/443 need one administrator prompt (`/etc/sysctl.d/50-lamprabit.conf`). HTTPS trust covers the system store plus Chrome/Firefox NSS databases (`certutil`). Open terminal works with GNOME's terminals; the MariaDB client button opens a terminal.
+
+### 9.3 MySQL
+Oracle MySQL next to MariaDB (port 3307 by default): 8.4 LTS, the newest LTS and the Innovation release, from MySQL's CDN (Linux: the minimal build), each release line with its own data folder.
+
+### 9.4 Dashboard redesign
+- Service list with selection and bulk Start/Stop; each row shows status, port, PID, uptime, port conflicts and problems, CPU and RAM sparklines (PHP workers' usage on the web-server rows) and a click-to-copy connection string.
+- **Stack profiles**: named sets of services (saved in settings). Starting a profile starts its services and stops the others; the title bar and Shift+S follow the active profile.
+- "Connect your app" panel: every service as a URL or as ready-to-paste `.env` lines, plus "Copy everything as .env".
+- Keyboard: `?` lists every shortcut; 1–5 switch pages; J/K or arrows move between services, Space selects, Enter starts/stops, S/X/R/O/C/E/P/L act on the selection or focused service. Dialogs trap focus and restore it; menus use arrow keys.
+
+### 9.5 Databases, Redis and page redesigns
+- Default database setting (MariaDB or MySQL); phpMyAdmin and Adminer list every installed database, the default first (fixes logins failing when MariaDB wasn't the running server).
+- Redis per platform: Garnet on Windows, with `redis-cli` from the community redis-windows build; real Redis (lampRabit's builds, 8.10 and 7.2) with its own `redis-cli` on Linux and macOS. phpRedisAdmin for browsing Redis data, served like phpMyAdmin. (A custom redis-cli and in-app browser were tried first and removed.) Garnet was replaced by real Redis in 10.1.
+- Sites: project cards show framework, git branch, database (opens in phpMyAdmin), Node version, last change, PHP/server/HTTPS controls and per-project sharing; search, framework filter and sort. Port sharing moved to Services → Sharing.
+- Services: grouped (web and PHP, databases, developer tools, sharing); the version in use is a large tile, other installed versions are tiles, downloads a list. Node.js uses the same layout.
+- Settings: one column of compact sections with a section index; duplicate Mailpit .env block removed (it's on the Overview).
 
 ## Phase 6: feature set
 
@@ -60,7 +246,7 @@ Order: 6.1 → 6.2 → 6.3 → 6.4 → 6.5 (reliability first; per-project PHP a
 - **Tunnels: Ngrok + Cloudflare** (decided): app-level (expose `localhost`) and per-project (expose `myapp.test` with a host-header rewrite, or a manual port).
   - Ngrok (default): binary downloaded on demand, auth token stored in the OS keychain, free-plan limits explained in the UI.
   - Cloudflare quick tunnels (`cloudflared`): no account needed, random `trycloudflare.com` URL.
-- **Redis / Memcached**: no official Windows builds for either. Windows: Redis-compatible alternative (Garnet) or Memurai, or "not available" with explanation; macOS/Linux: manage a package-manager install (brew/apt) or a downloaded build. PHP extensions (`redis`, `memcached`) offered only where builds exist for the active PHP.
+- **Redis / Memcached**: no official Windows builds for either. Windows: Redis-compatible alternative (Garnet) or Memurai, or "not available" with explanation; macOS/Linux: manage a package-manager install (brew/apt) or a downloaded build. PHP extensions (`redis`, `memcached`) offered only where builds exist for the active PHP. (Superseded in 10.1: real Redis and downloadable Memcached on every OS.)
 
 ### 6.5 Updates ✅
 - **App updates**: Tauri updater with signed releases on GitHub; check on start (opt-out) and from Settings. Depends on the release pipeline in phase 8.
@@ -84,9 +270,9 @@ Browse, enable, disable and add PHP extensions per installed PHP version, with c
 - Extensions with extra requirements are flagged (Imagick needs ImageMagick DLLs; Xdebug gets a ready-made `xdebug.mode=debug` and IDE port setting).
 - Status per extension: built in, enabled, disabled, downloadable, unavailable (with the reason).
 
-### 7.3 FrankenPHP: dropped for now
+### 7.3 FrankenPHP: brought back in phase 11
 
-Decision (2026-10-24): not planned. The assessment below is kept for reference if it is revisited.
+Decision (2026-10-24): not planned. Reversed on 2026-10-29: FrankenPHP and Caddy are phase 11. The assessment below still applies.
 
 #### Assessment
 FrankenPHP is a PHP application server built on Caddy: the web server and PHP run in one process, with automatic HTTPS, HTTP/2 and HTTP/3, and a "worker mode" that keeps the application booted between requests (Laravel Octane, Symfony Runtime).

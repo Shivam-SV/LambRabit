@@ -19,12 +19,27 @@ Status labels: **Available** (in the app today) and **Coming soon** (designed an
 ## 1. Services
 
 ### Service management (Available)
-Start, stop and restart Apache, Nginx, MariaDB and Mailpit individually or all at once. Each service card shows its status, version, port, process ID and uptime. Services never outlive the app: closing or crashing lampRabit stops them, so nothing is left holding a port.
+Start, stop and restart Apache, Nginx, MariaDB, MySQL and Mailpit individually, as a selection, or all at once. Each service shows its status, version, port, process ID, uptime and live CPU and memory use, and warns before you start it if another program holds its port.
+
+### Stack profiles (Available)
+Save named sets of services, such as "Laravel" (Apache, MariaDB, Redis, Mailpit) or "WordPress" (Apache, MySQL). Starting a profile starts its services and stops the rest, so switching between projects is one click or Shift+S.
+
+### phpRedisAdmin (Available)
+Browse and edit your local Redis in the browser at `phpredisadmin.test`, the way phpMyAdmin works for databases. Install it from Services; it's set up for lampRabit's Redis with no login (it's only reachable from your computer).
+
+### Default database (Available)
+Run MariaDB and MySQL side by side and choose which one is the default: it's what `mysql` and `mysqldump` use, where new projects create their database, and the first server phpMyAdmin and Adminer offer (both list every installed database).
+
+### Connection details (Available)
+Every service shows how your app connects to it, as a URL (`mariadb://root@127.0.0.1:3306`) or as ready-to-paste `.env` lines (`DB_HOST`, `DB_PORT`, `REDIS_HOST`, `MAIL_PORT`…). One click copies them; "Copy everything as .env" copies them all.
+
+### Keyboard first (Available)
+Press `?` for every shortcut. Number keys switch pages; J/K (or the arrow keys) move between services, Space selects, Enter starts or stops, and single keys restart, open, copy connection details and pick a profile. Everything is also reachable with Tab, with visible focus. Quitting lampRabit stops its services. If it crashes, Windows stops them at once; on Linux and macOS, lampRabit stops any leftovers the next time it opens, so nothing keeps holding a port.
 
 ### One-click runtimes and versions (Available; platform-limited)
-Install, switch and remove versions of Apache, Nginx, PHP and MariaDB from the Services page. Downloads come straight from the official sources (Apache Lounge, nginx.org, windows.php.net, mariadb.org) and are checked against their published SHA-256 checksums before use (nginx.org publishes PGP signatures only; those downloads rely on HTTPS). Switching a version restarts the services that use it.
+Install, switch and remove versions of Apache, Nginx, PHP, MariaDB, MySQL and Composer from the Services page. Downloads come straight from the official sources (Apache Lounge, nginx.org, windows.php.net, mariadb.org) and are checked against their published SHA-256 checksums before use (nginx.org publishes PGP signatures only; those downloads rely on HTTPS). Switching a version restarts the services that use it.
 
-Platform note: Windows has downloads for everything. On Linux, MariaDB downloads are available; Apache, Nginx and PHP downloads for macOS and Linux are coming soon.
+Platform note: Windows and Linux have downloads for everything. On Linux, Apache, Nginx and PHP come from lampRabit's own builds (nobody publishes portable Linux builds), made in the open by a GitHub workflow and checked against their published SHA-256 checksums. macOS downloads for Apache, Nginx and PHP are coming soon.
 
 ### Your stack at a glance (Available)
 A live diagram of web server → PHP → MariaDB, animated while requests can flow, with each runtime's versions on a timeline: active, installed and available at a glance.
@@ -41,7 +56,7 @@ If a port is taken, lampRabit names the program holding it (for example `node.ex
 ### Apache and Nginx (Available; Nginx on Windows)
 Run Apache, Nginx, or both. With both, Apache keeps ports 80/443 and Nginx gets its own (8080/8443 by default), and you choose the server for each site. Overlapping ports are rejected before anything starts. Nginx sites get front-controller routing out of the box, so Laravel, Symfony and WordPress pretty URLs just work.
 
-Platform note: Nginx downloads are Windows-only for now (nginx.org publishes Windows builds only); macOS and Linux support is coming soon.
+Platform note: Nginx downloads are available on Windows (nginx.org builds) and Linux (lampRabit's builds); macOS support is coming soon.
 
 ### System tray (Available)
 lampRabit lives in the system tray: start or stop everything, open the www folder or a terminal, and quit from its menu. Closing the window keeps your services running (you can turn this off).
@@ -119,6 +134,9 @@ Put any site on a public URL from its card, for testing webhooks, showing a clie
 
 ## 4. Databases
 
+### MySQL (Available; Windows and Linux downloads)
+Oracle MySQL runs next to MariaDB on its own port (3307 by default), so projects that need MySQL specifically get the real thing. Choose 8.4 LTS, the newest LTS or the Innovation release; each keeps its own data, so switching is always safe. Root has no password, like MariaDB.
+
 ### MariaDB (Available; Windows and Linux downloads)
 Several MariaDB versions available, including long-term-support releases. The data directory is created on first start with a passwordless local `root` user, like XAMPP and Laragon. MariaDB shuts down gracefully so no data is lost.
 
@@ -129,10 +147,10 @@ Install either or both from Services. They're served at `phpmyadmin.test` and `a
 Open the MariaDB client in a terminal, already connected, from the MariaDB card's menu.
 
 ### Redis (Available)
-A Redis-compatible server on every platform: Microsoft's Garnet, installed from Services together with a private .NET runtime (nothing is installed system-wide). It runs on port 6379 with health checks and logs like every other service. Data is kept in memory, which suits caches, sessions and queues in development. PHP apps can use it through Predis or the phpredis extension (one click in the PHP extension manager).
+Real Redis on every platform: lampRabit's own builds (8.10 or 7.2) on Linux and macOS, and on Windows, where Redis has no official build, the community redis-windows build (Redis compiled for Windows), checked against its published SHA-256. `redis-cli` comes with it and works in lampRabit's terminal, and in any terminal once Settings → Terminal → Add lampRabit's commands to PATH is on. phpRedisAdmin shows its data. It runs on port 6379 with health checks and logs like every other service. PHP apps can use it through Predis or the phpredis extension (one click in the PHP extension manager).
 
-### Memcached (Available on macOS and Linux)
-lampRabit runs the `memcached` installed on your system (`brew install memcached` or `apt install memcached`). There are no maintained Memcached builds for Windows, so on Windows lampRabit explains this and suggests Redis instead.
+### Memcached (Available)
+Install it from Services like any other runtime: lampRabit's own builds on Linux and macOS, and on Windows nono303's build (Memcached has no official Windows build), checked and repackaged by lampRabit. It runs on port 11211 with 128 MB of memory, with health checks and logs. PHP talks to it through the `memcached` extension: built into lampRabit's PHP on Linux and macOS, one click in the PHP extension manager on Windows.
 
 ---
 
@@ -191,7 +209,7 @@ Windows (`.exe` / `.msi`), macOS for Apple Silicon and Intel (`.dmg`), and Linux
 
 ### Coming soon
 - **Code-signed installers** for Windows and macOS.
-- **Apache, Nginx and PHP downloads on macOS and Linux**, making those platforms fully supported.
+- **Apache, Nginx and PHP downloads on macOS**, making it fully supported.
 
 ---
 
@@ -208,7 +226,8 @@ Windows (`.exe` / `.msi`), macOS for Apple Silicon and Intel (`.dmg`), and Linux
 | Health checks and diagnostics report | Yes | No | No |
 | Mail catcher | Mailpit | Mercury | Mailpit option |
 | Runs without administrator rights | Yes (asks only for hosts and certificates) | Often needs admin | Usually run as admin |
-| macOS and Linux | Preview (Apache, Nginx and PHP downloads coming) | Yes | Windows only |
+| Linux | Yes | Yes | Windows only |
+| macOS | Preview (Apache, Nginx and PHP downloads coming) | Yes | Windows only |
 | Open source | Yes | Yes | Source available |
 
 Keep the comparison factual and update it if competitors change; avoid disparaging language.

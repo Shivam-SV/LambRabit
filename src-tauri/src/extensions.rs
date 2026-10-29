@@ -39,6 +39,12 @@ const EXTRAS: &[Extra] = &[
     Extra { name: "redis", description: "Native Redis client (phpredis)", ini: "", note: Some("Pairs with lampRabit's Redis service. Some apps also want igbinary.") },
     Extra { name: "apcu", description: "In-memory user cache", ini: "apc.enable_cli = 1\n", note: None },
     Extra { name: "igbinary", description: "Compact binary serializer, used by Redis and Memcached clients", ini: "", note: None },
+    Extra {
+        name: "memcached",
+        description: "Memcached client (libmemcached)",
+        ini: "",
+        note: Some("Pairs with lampRabit's Memcached service. Installs libmemcached's DLL next to PHP."),
+    },
     Extra { name: "mongodb", description: "MongoDB driver", ini: "", note: None },
     Extra { name: "pcov", description: "Fast code coverage for PHPUnit", ini: "pcov.enabled = 1\n", note: Some("Don't enable together with Xdebug coverage.") },
     Extra { name: "imagick", description: "ImageMagick image processing", ini: "", note: Some("Installs ImageMagick's DLLs next to PHP.") },
@@ -130,14 +136,22 @@ pub fn effective(settings: &Settings, layout: &Layout, php: &str) -> Vec<String>
     on.into_iter().collect()
 }
 
+/// OPcache for development: on, but picks up edited files immediately.
+const OPCACHE_DEV: &str = "opcache.enable=1\nopcache.validate_timestamps=1\nopcache.revalidate_freq=0\n";
+
 /// php.ini lines for the enabled extensions.
 pub fn ini_lines(settings: &Settings, layout: &Layout, php: &str) -> String {
     let mut out = String::new();
+    if !cfg!(windows) {
+        // lampRabit's Linux builds have every extension compiled in; only settings apply.
+        out.push_str(OPCACHE_DEV);
+        return out;
+    }
     for ext in effective(settings, layout, php) {
         let directive = if ZEND.contains(&ext.as_str()) { "zend_extension" } else { "extension" };
         out.push_str(&format!("{directive}={ext}\n"));
         if ext == "opcache" {
-            out.push_str("opcache.enable=1\nopcache.validate_timestamps=1\nopcache.revalidate_freq=0\n");
+            out.push_str(OPCACHE_DEV);
         }
         if let Some(extra) = EXTRAS.iter().find(|x| x.name == ext) {
             out.push_str(extra.ini);

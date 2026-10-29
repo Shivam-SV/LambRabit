@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Linux runtime builds (build/linux/build-*.sh) run from the repo root
+/out/
+/work/

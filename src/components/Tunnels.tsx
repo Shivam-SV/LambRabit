@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, ExternalLink, Loader2, Radio, Share2, Square } from "lucide-react";
@@ -88,44 +88,65 @@ export function TunnelRow({ tunnel, compact = false }: { tunnel: Tunnel; compact
   );
 }
 
-/** "Share" control on a site card. */
-export function ShareSite({ site, tunnel }: { site: Site; tunnel?: Tunnel }) {
+/** The live public URL of a project, if it's shared. */
+export function useProjectTunnel(site: Site) {
+  return useTunnels().data?.find((t) => t.site === site.name);
+}
+
+/** "Share" button on a project card: pick a provider to put the project on a public URL. */
+export function ShareButton({ site }: { site: Site }) {
   const providers = useProviders();
   const navigate = useAppStore((s) => s.navigate);
   const { start } = useTunnelActions();
   const [open, setOpen] = useState(false);
-
-  if (tunnel) return <TunnelRow tunnel={tunnel} compact />;
-
-  const choose = (provider: TunnelProvider) => {
-    setOpen(false);
-    start.mutate({ provider, site: site.name, port: null });
-  };
+  const root = useRef<HTMLDivElement>(null);
+  const available = (["cloudflare", "ngrok"] as const).filter((p) => providers[p]);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
   return (
-    <div className="relative">
-      <Button onClick={() => setOpen((o) => !o)} aria-label={`Share ${site.domain}`} disabled={start.isPending}>
-        {start.isPending ? <Loader2 size={15} className="animate-spin" /> : <Share2 size={15} />}
+    <div ref={root} className="relative">
+      <Button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} disabled={start.isPending}>
+        {start.isPending ? <Loader2 size={15} className="animate-spin" /> : <Share2 size={15} />} Share
       </Button>
       {open && (
-        <div className="absolute right-0 bottom-full z-20 mb-1.5 w-60 rounded-xl border border-line bg-surface p-1 shadow-float">
-          <div className="px-2.5 pt-1.5 pb-1 text-xs text-muted">Share on a public URL</div>
-          {(["ngrok", "cloudflare"] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => (providers[p] ? choose(p) : navigate("services"))}
-              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2"
-            >
-              {providerLabel[p]}
-              <span className="text-xs text-muted">{providers[p] ? (p === "cloudflare" ? "No account" : "Free account") : "Install first"}</span>
+        <div
+          role="menu"
+          className="motion-pop absolute right-0 bottom-full z-20 mb-1.5 w-64 rounded-xl border border-line bg-surface p-1 shadow-float"
+          onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+        >
+          <div className="px-2.5 pt-1.5 pb-1 text-xs text-muted">Put {site.domain} on a public URL</div>
+          {available.length === 0 ? (
+            <button role="menuitem" onClick={() => navigate("services")} className="w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2">
+              Install Cloudflare Tunnel or Ngrok first
             </button>
-          ))}
+          ) : (
+            available.map((p) => (
+              <button
+                key={p}
+                role="menuitem"
+                autoFocus={p === available[0]}
+                onClick={() => {
+                  setOpen(false);
+                  start.mutate({ provider: p, site: site.name, port: null });
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+              >
+                {providerLabel[p]}
+                <span className="text-xs text-muted">{p === "cloudflare" ? "No account needed" : "Your ngrok account"}</span>
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/** Sites page panel: every running tunnel plus sharing any local port. */
+/** Services page panel: every running tunnel plus sharing any local port. */
 export function TunnelsPanel() {
   const tunnels = useTunnels();
   const providers = useProviders();
@@ -141,7 +162,7 @@ export function TunnelsPanel() {
     <Card className="mb-5 p-5">
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <Share2 size={18} className="text-violet-500" />
-        <h2 className="flex-1 font-bold tracking-tight">Shared on the internet</h2>
+        <h2 className="flex-1 font-bold tracking-tight">Public URLs</h2>
         {anyProvider && (
           <div className="flex items-center gap-2">
             <select
@@ -172,8 +193,8 @@ export function TunnelsPanel() {
       </div>
       {list.length === 0 ? (
         <p className="text-sm text-muted">
-          Nothing is shared. Use the share button on a site, or share any local port (for example a Node dev server). Apps
-          that store their own URL (WordPress, Laravel's APP_URL) may redirect to the .test domain.
+          Nothing is shared. Share a project from its card on the Sites page, or any local port here (for example a Node dev
+          server). Apps that store their own URL (WordPress, Laravel's APP_URL) may redirect to the .test domain.
         </p>
       ) : (
         <div className="grid gap-2 md:grid-cols-2">

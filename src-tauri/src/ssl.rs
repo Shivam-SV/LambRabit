@@ -132,13 +132,66 @@ pub async fn ca_trusted(layout: &Layout) -> bool {
             .await
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).to_uppercase().contains(&thumb))
     } else {
-        false
+        // The system store holds a copy of our certificate once trusted.
+        let ours = std::fs::read(ca_cert_path(layout)).ok();
+        linux_store().is_some_and(|(dir, _)| ours.is_some() && std::fs::read(dir.join(LINUX_FILE)).ok() == ours)
     }
 }
 
+const LINUX_FILE: &str = "lampRabit.crt";
+
+/// The distribution's folder for extra trusted CAs and the command that rebuilds the
+/// store from it: Debian/Ubuntu, Fedora/RHEL, Arch, openSUSE.
+fn linux_store() -> Option<(PathBuf, &'static str)> {
+    [
+        ("/usr/local/share/ca-certificates", "update-ca-certificates"),
+        ("/etc/pki/ca-trust/source/anchors", "update-ca-trust"),
+        ("/etc/ca-certificates/trust-source/anchors", "update-ca-trust"),
+        ("/etc/pki/trust/anchors", "update-ca-certificates"),
+    ]
+    .into_iter()
+    .map(|(dir, cmd)| (PathBuf::from(dir), cmd))
+    .find(|(dir, _)| dir.is_dir())
+}
+
+/// Chrome, Chromium and Firefox on Linux ignore the system store and read NSS databases:
+/// the shared ~/.pki/nssdb and one per Firefox profile. Needs `certutil` (libnss3-tools).
+/// Returns a note when browsers couldn't be covered.
+async fn trust_in_browsers(crt: &Path) -> Option<String> {
+    let home = dirs::home_dir()?;
+    if tokio::process::Command::new("certutil").arg("-H").output().await.is_err() {
+        return Some(
+            "Trusted by the system. Chrome and Firefox keep their own certificate lists: install certutil (sudo apt install libnss3-tools, or nss-tools on Fedora) and click Trust again to add it there.".into(),
+        );
+    }
+    let certutil = |db: &Path| {
+        let mut cmd = tokio::process::Command::new("certutil");
+        cmd.arg("-d").arg(format!("sql:{}", db.display()));
+        cmd
+    };
+    let shared = home.join(".pki/nssdb");
+    if !shared.join("cert9.db").exists() {
+        let _ = std::fs::create_dir_all(&shared);
+        let _ = certutil(&shared).args(["-N", "--empty-password"]).output().await;
+    }
+    let mut dbs = vec![shared];
+    for profiles in [".mozilla/firefox", "snap/firefox/common/.mozilla/firefox", ".var/app/org.mozilla.firefox/.mozilla/firefox"] {
+        for entry in std::fs::read_dir(home.join(profiles)).into_iter().flatten().flatten() {
+            if entry.path().join("cert9.db").exists() {
+                dbs.push(entry.path());
+            }
+        }
+    }
+    for db in dbs {
+        let _ = certutil(&db).args(["-A", "-t", "C,,", "-n", CA_NAME, "-i"]).arg(crt).output().await;
+    }
+    None
+}
+
 /// Adds the CA to the current user's trust store. Windows and macOS show their own
-/// confirmation prompt; nothing needs administrator rights.
-pub async fn trust_ca(layout: &Layout) -> Result<()> {
+/// confirmation prompt; Linux asks for administrator rights for the system store. Returns
+/// a note when part of it couldn't be done.
+pub async fn trust_ca(layout: &Layout) -> Result<Option<String>> {
     let crt = ca_cert_path(layout);
     if !crt.exists() {
         ensure_ca(layout)?;
@@ -157,13 +210,15 @@ pub async fn trust_ca(layout: &Layout) -> Result<()> {
             .output()
             .await?
     } else {
-        return Err(Error::msg(format!(
-            "Add {} to your system and browser certificate stores (e.g. `sudo cp <file> /usr/local/share/ca-certificates/lampRabit.crt && sudo update-ca-certificates`).",
-            crt.display()
-        )));
+        let (dir, update) = linux_store().ok_or_else(|| {
+            Error::msg(format!("Couldn't find this system's certificate store. Add {} to it by hand.", crt.display()))
+        })?;
+        let quote = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"));
+        let script = format!("install -m 644 {} {} && {update}", quote(&crt), quote(&dir.join(LINUX_FILE)));
+        tokio::process::Command::new("pkexec").args(["sh", "-c", &script]).output().await?
     };
     if !output.status.success() {
         return Err(Error::msg("The certificate was not trusted (the prompt may have been cancelled)."));
     }
-    Ok(())
+    Ok(if cfg!(target_os = "linux") { trust_in_browsers(&crt).await } else { None })
 }
