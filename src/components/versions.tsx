@@ -11,13 +11,16 @@ import { Button } from "./ui";
 /** The version in use. `children` are its actions (open folder…). */
 export function ActiveTile({ version, details, children }: { version: string; details?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="flex flex-col rounded-2xl border border-accent/35 bg-accent-soft p-4">
-      <div className="flex items-center gap-1.5 text-xs font-bold tracking-wider text-accent-text uppercase">
-        <Check size={13} /> In use
+    <div className="flex flex-col rounded-2xl border border-line bg-surface p-5 shadow-card">
+      <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
+        <h4 className="text-xs font-bold tracking-wider text-muted uppercase">Installed version</h4>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/20 bg-ok/10 px-2 py-1 text-xs font-semibold text-ok">
+          <span className="size-1.5 rounded-full bg-ok" aria-hidden /> Active
+        </span>
       </div>
-      <div className="mt-1 font-mono text-3xl font-semibold tracking-tight">{version}</div>
-      {details && <div className="mt-1 space-y-1 text-xs text-muted">{details}</div>}
-      {children && <div className="mt-auto flex flex-wrap gap-2 pt-4">{children}</div>}
+      <div className="mt-4 font-mono text-3xl font-bold tracking-tight text-fg">{version}</div>
+      {details && <div className="mt-2 space-y-1 text-xs text-muted">{details}</div>}
+      {children && <div className="mt-auto flex flex-wrap justify-end gap-2 pt-5">{children}</div>}
     </div>
   );
 }
@@ -131,7 +134,17 @@ export function AvailableList({
       <h4 className="mb-2 text-xs font-bold tracking-wider text-muted uppercase">{title}</h4>
       {loading && <p className="text-sm text-muted">Fetching versions…</p>}
       {!!error && <p className="text-sm text-danger-text">{String(error)}</p>}
-      {!loading && !error && items.length === 0 && <p className="text-sm text-muted">You have every available version.</p>}
+      {!loading && !error && items.length === 0 && (
+        title === "Available to download" ? (
+          <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border-2 border-dashed border-line bg-surface px-5 py-7 text-center">
+            <span className="mb-3 flex size-10 items-center justify-center rounded-full bg-accent-soft text-accent-text"><Check size={20} /></span>
+            <p className="font-semibold text-fg">All versions downloaded</p>
+            <p className="mt-1 max-w-xs text-sm text-muted">You have every available version of {name} installed.</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-line px-4 py-5 text-center text-sm text-muted">No versions are available right now.</div>
+        )
+      )}
       {shown.length > 0 && (
         <ul className="divide-y divide-line rounded-xl border border-line">
           {shown.map((r) => (
@@ -169,7 +182,7 @@ export function AvailableList({
 /** The two-column body every runtime card shares. */
 export function VersionsLayout({ active, children }: { active: ReactNode; children: ReactNode }) {
   return (
-    <div className="grid gap-5 p-5 lg:grid-cols-[minmax(15rem,18rem)_minmax(0,1fr)]">
+    <div className="grid gap-5 p-6 lg:grid-cols-[minmax(15rem,18rem)_minmax(0,1fr)]">
       {active}
       <div className="min-w-0 space-y-4">{children}</div>
     </div>

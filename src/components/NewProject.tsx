@@ -285,7 +285,7 @@ export default function NewProject() {
               )}
             </ol>
             {output.length > 0 && (
-              <pre className="selectable max-h-56 overflow-auto rounded-xl bg-[#10151c] p-3 font-mono text-[11.5px] leading-relaxed text-slate-300">
+              <pre className="selectable max-h-56 overflow-auto rounded-xl bg-terminal p-3 font-mono text-[11.5px] leading-relaxed text-slate-300">
                 {output.join("\n")}
                 <div ref={outputEnd} />
               </pre>

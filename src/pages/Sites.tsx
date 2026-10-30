@@ -4,6 +4,7 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   Clock,
   Code2,
   Copy,
@@ -14,8 +15,6 @@ import {
   GitBranch,
   Globe,
   Hexagon,
-  Lock,
-  LockOpen,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -95,7 +94,7 @@ export default function Sites() {
             <Button onClick={() => paths.data && openPath(paths.data.www).catch(onError)}>
               <FolderOpen size={16} /> Open www
             </Button>
-            <Button variant="primary" onClick={() => openNewProject(true)} title="New project (N)">
+            <Button onClick={() => openNewProject(true)} title="New project (N)">
               <FolderPlus size={16} /> New project
             </Button>
             <Button onClick={() => info.refetch()} disabled={info.isFetching} aria-label="Refresh sites">
@@ -208,7 +207,7 @@ export default function Sites() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search projects or branches"
                 aria-label="Search projects"
-                className={clsx(inputClass, "pl-9")}
+                className={clsx(inputClass, "border-line bg-surface pl-9")}
               />
             </div>
             {frameworks.length > 1 && (
@@ -220,8 +219,8 @@ export default function Sites() {
                     aria-checked={framework === f}
                     onClick={() => setFramework(f)}
                     className={clsx(
-                      "rounded-lg px-2.5 py-1 text-xs font-medium",
-                      framework === f ? "bg-accent text-accent-fg" : "border border-line bg-surface text-muted hover:text-fg",
+                      "rounded-lg px-2.5 py-1 text-xs font-medium transition-colors",
+                      framework === f ? "bg-surface-2 text-fg" : "text-muted hover:bg-surface-2 hover:text-fg",
                     )}
                   >
                     {f ?? "All"}
@@ -243,13 +242,13 @@ export default function Sites() {
           {shown.length === 0 ? (
             <p className="py-10 text-center text-muted">No projects match.</p>
           ) : (
-            <div className="grid items-start gap-4 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
-              <Card className="overflow-hidden p-2">
-                <div className="flex items-center justify-between px-2 py-2">
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(200px,240px)_minmax(0,1fr)]">
+              <nav aria-label="Projects" className="scrollbar-thin min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+                <div className="flex items-center justify-between border-b border-line px-2 pb-3">
                   <h2 className="text-sm font-bold">Projects</h2>
                   <span className="text-xs tabular-nums text-muted">{shown.length}</span>
                 </div>
-                <ul className="space-y-1" aria-label="Projects">
+                <ul className="divide-y divide-line">
                   {shown.map((site) => {
                     const selected = selectedSite?.path === site.path;
                     return (
@@ -259,32 +258,24 @@ export default function Sites() {
                           aria-current={selected ? "true" : undefined}
                           onClick={() => setSelectedPath(site.path)}
                           className={clsx(
-                            "w-full rounded-xl px-3 py-2.5 text-left transition-colors",
-                            selected ? "bg-accent-soft text-accent-text" : "text-fg hover:bg-surface-2/70",
+                            "relative w-full rounded-lg px-3 py-3.5 text-left transition-colors",
+                            selected ? "bg-surface-2 text-fg" : "text-fg hover:bg-surface-2/70",
                           )}
                         >
-                          <span className="block truncate text-sm font-semibold">{site.name}</span>
+                          <span className="block truncate text-[15px] font-bold">{site.name}</span>
                           <span className="mt-0.5 block truncate font-mono text-xs text-muted">{site.domain}</span>
                           <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted">
-                            {site.framework ?? "Folder"}
-                            <span aria-hidden>·</span>
-                            {serviceLabels[site.server]}
-                            {site.gitBranch && <><span aria-hidden>·</span><GitBranch size={11} />{site.gitBranch}</>}
+                            {site.framework ?? "Folder"}<span aria-hidden> · </span>{serviceLabels[site.server]}
+                            {site.gitBranch && <><span aria-hidden> · </span><GitBranch size={11} />{site.gitBranch}</>}
                           </span>
                         </button>
                       </li>
                     );
                   })}
                 </ul>
-              </Card>
+              </nav>
               <div className="min-w-0">
-                {selectedSite ? (
-                  <ProjectCard key={selectedSite.path} site={selectedSite} info={data} />
-                ) : (
-                  <Card className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-muted">
-                    No projects match these filters.
-                  </Card>
-                )}
+                {selectedSite ? <ProjectCard key={selectedSite.path} site={selectedSite} info={data} /> : null}
               </div>
             </div>
           )}
@@ -316,7 +307,6 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
   const onError = (e: unknown) => notify("error", String(e));
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
   const installed = useQuery({ queryKey: ["installed"], queryFn: api.installedRuntimes });
-  const services = useQuery({ queryKey: ["services"], queryFn: api.listServices });
   const node = useQuery({ queryKey: ["node"], queryFn: api.nodeStatus, enabled: !!site.node });
   const tunnel = useProjectTunnel(site);
   const phpVersions = installed.data?.find((i) => i.runtime === "php")?.versions ?? [];
@@ -328,7 +318,6 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
   const setPhp = useMutation({ mutationFn: (v: string | null) => api.setSitePhp(site.name, v), onSuccess, onError });
   const setServer = useMutation({ mutationFn: (v: Server | null) => api.setSiteServer(site.name, v), onSuccess, onError });
   const busy = toggleSsl.isPending || setPhp.isPending || setServer.isPending;
-  const live = services.data?.some((s) => s.kind === site.server && s.state === "running");
   const php = site.php ?? settings.data?.versions.php;
   const nodeMissing = !!site.node && !!node.data?.manager && !node.data.installed.some((v) => v === site.node || v.startsWith(`${site.node}.`));
   const dbUrl = site.database ? databaseUrl(site.database, info, settings.data) : null;
@@ -339,53 +328,52 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
     }, onError);
 
   return (
-    <Card className="flex flex-col overflow-hidden">
+    <div className="space-y-4">
       {/* Identity: what it is and whether it's up */}
-      <div className="flex items-start gap-4 px-5 pt-5">
+      <Card className="p-5">
+      <div className="flex flex-wrap items-center gap-4">
         <div
-          className={clsx("flex size-11 shrink-0 items-center justify-center rounded-xl text-base font-bold", frameworkStyle[site.framework ?? ""] ?? "bg-accent-soft text-accent-text")}
+          className={clsx("flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-bold", frameworkStyle[site.framework ?? ""] ?? "bg-accent-soft text-accent-text")}
           aria-hidden
         >
           {(site.framework ?? site.name).charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base leading-tight font-bold">{site.domain}</h2>
+          <h2 className="truncate text-lg leading-tight font-bold">{site.name}</h2>
           <button
             onClick={() => openUrl(site.url).catch(onError)}
-            className="mt-1 flex max-w-full items-center gap-1 font-mono text-xs text-muted hover:text-accent-text"
+            className="mt-1 flex max-w-full items-center gap-1.5 font-mono text-sm text-muted hover:text-accent-text"
             title={`Open ${site.url}`}
           >
-            {site.ssl ? <Lock size={11} className="shrink-0" aria-label="HTTPS" /> : <LockOpen size={11} className="shrink-0" aria-label="HTTP only" />}
-            <span className="truncate">{site.url}</span>
+            <span className="truncate">{site.domain}</span>
+            <ExternalLink size={12} className="shrink-0" aria-hidden />
           </button>
         </div>
-        <span
-          className={clsx(
-            "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-            live ? "bg-accent-soft text-accent-text" : "bg-surface-2 text-muted",
-          )}
-          title={live ? `Served by ${serviceLabels[site.server]}` : `Start ${serviceLabels[site.server]} to open it`}
-        >
-          <span className={clsx("size-1.5 rounded-full", live ? "bg-ok" : "bg-muted/60")} aria-hidden />
-          {live ? "Live" : "Stopped"}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="primary" onClick={() => openUrl(site.url).catch(onError)}><ExternalLink size={15} /> Open site</Button>
+          {!tunnel && <ShareButton site={site} />}
+        </div>
       </div>
 
-      {/* One line of what it runs on */}
-      <p className="mt-3 px-5 text-sm text-muted">
-        <span className="font-medium text-accent bg-accent-soft py-1 px-1.5 rounded-full">{site.framework === "PHP" ? "Plain PHP" : (site.framework ?? "Folder")}</span>
-        <span aria-hidden> · </span>PHP {php ?? "—"}
-        <span aria-hidden> · </span>
-        {serviceLabels[site.server]}
-        {site.docroot !== site.path && (
-          <>
-            <span aria-hidden> · </span>serves public/
-          </>
-        )}
-      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-line pt-3">
+        <Button size="sm" variant="ghost" onClick={() => api.openInEditor(site.path).catch(onError)}><Code2 size={14} /> Editor</Button>
+        <Button size="sm" variant="ghost" onClick={() => api.openTerminal(site.path).catch(onError)}><SquareTerminal size={14} /> Terminal</Button>
+        <Button size="sm" variant="ghost" onClick={() => openPath(site.path).catch(onError)}><FolderOpen size={14} /> Open folder</Button>
+      </div>
+      {tunnel && <div className="mt-3"><TunnelRow tunnel={tunnel} /></div>}
 
-      {/* Facts that exist; nothing is listed just to say it's missing */}
-      <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 px-5 text-xs text-muted">
+      </Card>
+
+      <div className="space-y-4">
+      <Card className="p-5">
+      <div className="mb-4 border-b border-line pb-3">
+        <h3 className="text-sm font-bold">Project details</h3>
+      </div>
+      <p className="mt-2 text-sm text-muted">
+        {site.framework === "PHP" ? "Plain PHP" : site.framework ?? "Folder"} <span aria-hidden>·</span> PHP {php ?? "—"} <span aria-hidden>·</span> {serviceLabels[site.server]}
+        {site.docroot !== site.path && <> <span aria-hidden>·</span> serves public/</>}
+      </p>
+      <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-3 text-sm text-muted">
         {site.gitBranch && (
           <li className="flex items-center gap-1.5" title="Git branch">
             <GitBranch size={13} aria-hidden /> <span className="font-mono text-fg">{site.gitBranch}</span>
@@ -418,28 +406,29 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
 
       <button
         onClick={copyPath}
-        className="group mx-5 mt-3 flex min-w-0 items-center gap-2 rounded-lg bg-surface-2/70 px-3 py-1.5 text-left font-mono text-xs text-muted hover:text-fg"
+        className="group mt-4 flex min-w-0 w-full items-center gap-2 rounded-lg border border-transparent bg-surface-2 px-3 py-2 text-left font-mono text-xs text-muted hover:text-fg"
         title="Copy folder path"
       >
         <FolderOpen size={13} className="shrink-0" aria-hidden />
         <span className="selectable min-w-0 flex-1 truncate">{site.path}</span>
-        {copied ? <Check size={13} className="shrink-0 text-accent-text" /> : <Copy size={13} className="shrink-0 opacity-0 group-hover:opacity-100" />}
+        {copied ? <Check size={13} className="shrink-0 text-accent-text" /> : <Copy size={13} className="shrink-0 text-muted transition-colors group-hover:text-accent-text" />}
       </button>
+      </Card>
 
-      {tunnel && (
-        <div className="mx-5 mt-3">
-          <TunnelRow tunnel={tunnel} />
+      <Card className="p-5">
+        <div className="mb-4 border-b border-line pb-3">
+          <h3 className="text-sm font-bold">Local environment</h3>
+          <p className="mt-1 text-xs text-muted">Runtime and server settings for this project.</p>
         </div>
-      )}
-
-        <div className={clsx("mx-5 mt-3 divide-y divide-line rounded-xl border border-line text-sm", busy && "opacity-60")}>
+        <div className={clsx("mt-4 divide-y divide-line rounded-xl border border-line text-sm", busy && "opacity-60")}>
           <label className="flex items-center justify-between gap-3 px-3 py-2">
             <span>PHP version</span>
+            <div className="relative w-44">
             <select
               value={site.php ?? ""}
               disabled={busy}
               onChange={(e) => setPhp.mutate(e.target.value || null)}
-              className="w-44 rounded-md border border-line bg-surface px-2 py-1 text-sm"
+              className="w-full appearance-none rounded-md border border-line bg-surface-2 px-2 py-1.5 pr-8 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
             >
               <option value="">Default · {settings.data?.versions.php ?? "none"}</option>
               {phpVersions.map((v) => (
@@ -448,19 +437,24 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
                 </option>
               ))}
             </select>
+            <ChevronDown size={14} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-muted" aria-hidden />
+            </div>
           </label>
           {settings.data?.webServer === "both" && (
             <label className="flex items-center justify-between gap-3 px-3 py-2">
               <span>Web server</span>
+              <div className="relative w-44">
               <select
                 value={site.server}
                 disabled={busy}
                 onChange={(e) => setServer.mutate(e.target.value as Server)}
-                className="w-44 rounded-md border border-line bg-surface px-2 py-1 text-sm"
+                className="w-full appearance-none rounded-md border border-line bg-surface-2 px-2 py-1.5 pr-8 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               >
                 <option value="apache">Apache</option>
                 <option value="nginx">Nginx</option>
               </select>
+              <ChevronDown size={14} className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-muted" aria-hidden />
+              </div>
             </label>
           )}
           <div className="flex items-center justify-between gap-3 px-3 py-2">
@@ -468,34 +462,10 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
             <Switch checked={site.ssl} onChange={(v) => toggleSsl.mutate(v)} label={`HTTPS for ${site.domain}`} />
           </div>
         </div>
-
-      {/* Actions: the main one first, tools next, then sharing and settings */}
-      <div className="mt-auto flex flex-wrap items-center gap-2 px-5 pt-4 pb-5">
-        <Button variant="primary" onClick={() => openUrl(site.url).catch(onError)}>
-          <ExternalLink size={15} /> Open site
-        </Button>
-        <Button onClick={() => api.openInEditor(site.path).catch(onError)}>
-          <Code2 size={15} /> Editor
-        </Button>
-        <Button variant="ghost" onClick={() => api.openTerminal(site.path).catch(onError)} aria-label={`Terminal in ${site.name}`} title="Terminal here">
-          <SquareTerminal size={16} />
-        </Button>
-        <Button variant="ghost" onClick={() => openPath(site.path).catch(onError)} aria-label={`Open ${site.name} folder`} title="Open folder">
-          <FolderOpen size={16} />
-        </Button>
-        <span className="flex-1" />
-        {!tunnel && <ShareButton site={site} />}
-        {/* <Button
-          variant={configure ? "soft" : "ghost"}
-          onClick={() => setConfigure((c) => !c)}
-          aria-expanded={configure}
-          aria-label={`Configure ${site.domain}`}
-          title="PHP version, web server, HTTPS"
-        >
-          <SlidersHorizontal size={16} />
-        </Button> */}
+      </Card>
       </div>
-    </Card>
+
+    </div>
   );
 }
 

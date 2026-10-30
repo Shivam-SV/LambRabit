@@ -4,6 +4,11 @@
 /* Reduced or no motion (see lib/motion.ts): `still:` drops movement-based utilities. */
 @custom-variant still (&:where([data-motion="reduced"] *, [data-motion="off"] *));
 
+/* Side lists that scroll on their own: a slim scrollbar that still shows there's more. */
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
 /*
  * Brand palette (from the logo): charcoal #1b2028, mint #59d1a2, white.
  * Semantic tokens below map to Tailwind utilities: bg-surface, text-muted, bg-accent, ...
@@ -33,6 +38,9 @@
   --color-danger-text: var(--danger-text);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+  /* Log and command output: a dark terminal in both themes, so it's the same everywhere. */
+  --color-terminal: #10151c;
+  --color-terminal-2: #141b24;
 }
 
 :root {

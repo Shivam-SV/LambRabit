@@ -111,7 +111,6 @@ export default function Overview() {
   const hour = new Date(now).getHours();
   const greeting = greetings.find((g) => hour < g.until)!;
   const troubled = list.filter((s) => s.problem || (s.state === "running" && s.health?.status === "degraded"));
-  const siteCount = sites.data?.sites.length ?? 0;
   const installedCount = stack.usable.length;
 
   useEffect(() => {
@@ -187,35 +186,22 @@ export default function Overview() {
             {greeting.text}, developer
             <greeting.icon size={28} strokeWidth={1.75} className="text-accent-text" aria-hidden />
           </h1>
-          <p className="mt-2 text-muted" aria-live="polite">
+          {/* The service list shows counts; the header only speaks up when something needs doing. */}
+          <p className="mt-2 text-muted empty:hidden" aria-live="polite">
             {installedCount === 0 ? (
               "Install Apache, PHP and MariaDB from Services to get started."
             ) : (
-              <>
-                <span className={clsx("font-semibold", stack.running.length > 0 ? "text-accent-text" : "text-fg")}>
-                  {stack.running.length} of {installedCount} services running
+              troubled.length > 0 && (
+                <span className="font-medium text-danger-text">
+                  {troubled.map((s) => s.label).join(" and ")} {troubled.length === 1 ? "needs" : "need"} attention
                 </span>
-                <span className="mx-2 text-line" aria-hidden>
-                  •
-                </span>
-                {siteCount} local {siteCount === 1 ? "site" : "sites"}
-                {troubled.length > 0 && (
-                  <>
-                    <span className="mx-2 text-line" aria-hidden>
-                      •
-                    </span>
-                    <span className="font-medium text-danger-text">
-                      {troubled.map((s) => s.label).join(" and ")} {troubled.length === 1 ? "needs" : "need"} attention
-                    </span>
-                  </>
-                )}
-              </>
+              )
             )}
           </p>
           {installedCount > 0 && troubled.length === 0 && (
             <figure className="mt-2 max-w-2xl">
-              <blockquote className="text-lg text-muted italic">“{quote.text}”</blockquote>
-              <figcaption className="mt-0.5 text-sm text-muted/80">— {quote.author}</figcaption>
+              <blockquote className="text-muted italic">“{quote.text}”</blockquote>
+              <figcaption className="mt-0.5 text-xs text-muted/80">— {quote.author}</figcaption>
             </figure>
           )}
         </div>
