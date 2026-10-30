@@ -63,7 +63,9 @@ jobs:
           ]
           not_macos = os.environ["PHP_LINES_NOT_MACOS"].split()
           skip = lambda k, v, o: k == "php" and o == "macos" and ".".join(v.split(".")[:2]) in not_macos
-          include = [{"kind": k, "version": v, "os": o, "arch": a, "runner": r, "container": c, "args": ""}
+          # PHP is static against musl, so it doesn't need the old glibc; it builds on the
+          # runner itself, whose CMake is new enough for static-php-cli (Debian 11's isn't).
+          include = [{"kind": k, "version": v, "os": o, "arch": a, "runner": r, "container": "" if k == "php" else c, "args": ""}
                      for k, v in wanted for o, a, r, c in platforms if (k, v, o, a) not in have and not skip(k, v, o)]
           # Memcached for Windows is nono303's build, repackaged (nothing to compile).
           include += [{"kind": "memcached", "version": v, "os": "windows", "arch": "x86_64", "runner": "ubuntu-24.04", "container": "debian:bullseye", "args": "windows"}
@@ -94,7 +96,7 @@ jobs:
           apt-get update -qq
           apt-get install -y -qq build-essential curl ca-certificates gnupg bzip2 xz-utils unzip patchelf perl python3 file git >/dev/null
       - name: Build tools (macOS)
-        if: matrix.container == ''
+        if: matrix.os == 'macos'
         # Nginx's release signatures need gpg; static-php-cli installs its own tools.
         run: command -v gpg >/dev/null || brew install gnupg
       - uses: actions/checkout@v5

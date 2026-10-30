@@ -26,6 +26,9 @@ prefix="$WORK/stage-apache-$VERSION"
 rm -rf "$prefix"
 cd "$src"
 # Modules that would pull in system libraries (libxml2, Lua, nghttp2, curl…) stay off.
+# The static OpenSSL needs libpthread and libdl, separate libraries before glibc 2.34
+# (Debian 11). They go in LDFLAGS, which every link uses (ab's ignores LIBS); otherwise
+# configure finds "OpenSSL libraries are unusable" and ab fails to link.
 ./configure \
     --prefix="$prefix" \
     --with-included-apr \
@@ -42,7 +45,7 @@ cd "$src"
     --disable-lua --disable-brotli --disable-md --disable-session-crypto \
     --without-crypto --without-sqlite3 --without-pgsql --without-mysql --without-odbc \
     --without-ldap --without-berkeley-db --without-gdbm --without-ndbm \
-    LDFLAGS="-L$deps/lib" CPPFLAGS="-I$deps/include" LIBS="-ldl -lpthread" \
+    LDFLAGS="-L$deps/lib -pthread -Wl,--no-as-needed -ldl" CPPFLAGS="-I$deps/include" LIBS="-ldl -lpthread" \
     `# APR's own UUID code instead of libuuid, which isn't on every system` \
     ac_cv_header_uuid_uuid_h=no ac_cv_header_uuid_h=no ac_cv_func_uuid_create=no ac_cv_func_uuid_generate=no \
     ac_cv_search_uuid_create=no ac_cv_search_uuid_generate=no >/dev/null
