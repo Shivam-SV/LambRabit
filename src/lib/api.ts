@@ -207,6 +207,9 @@ export interface TemplateVariable {
   type: "text" | "choice" | "bool";
   options: string[];
   default: string | null;
+  /** Shown only while this condition holds (same syntax as a step's if:). */
+  when: string | null;
+  required: boolean;
 }
 
 export interface ProjectTemplate {
@@ -224,7 +227,7 @@ export interface ProjectTemplate {
   extensions: string[];
   database: "none" | "optional" | "required";
   variables: TemplateVariable[];
-  optionalSteps: { id: string; label: string; default: boolean }[];
+  optionalSteps: { id: string; label: string; default: boolean; when: string | null }[];
   /** Steps needing approval (templates you added yourself). */
   risks: { step: string; heading: string; command: string; reasons: string[] }[];
   done: string | null;

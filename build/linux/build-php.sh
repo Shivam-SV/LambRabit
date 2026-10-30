@@ -15,10 +15,10 @@ cd "$build"
 log "PHP $LINE: toolchain"
 ./spc doctor --auto-fix
 log "PHP $LINE: sources"
-./spc download --with-php="$LINE" --for-extensions="$PHP_EXTENSIONS" --retry=3
+./spc download --with-php="$LINE" --for-extensions="$PHP_EXTENSIONS" --for-libs="$PHP_LIBS" --retry=3
 log "PHP $LINE: compiling"
 # static-php-cli keeps the compiler's output in its log; show it when the build fails.
-./spc build "$PHP_EXTENSIONS" --build-cli --build-fpm || {
+./spc build "$PHP_EXTENSIONS" --with-libs="$PHP_LIBS" --build-cli --build-fpm || {
     tail -n 80 log/spc.output.log >&2 2>/dev/null || true
     exit 1
 }
@@ -35,6 +35,10 @@ echo "$modules"
 # once: `php -m | grep -q` can kill php with SIGPIPE, which pipefail reports as missing.)
 for ext in redis memcached igbinary; do
     grep -qx "$ext" <<<"$modules" || { echo "PHP $VERSION was built without $ext" >&2; exit 1; }
+done
+# GD without these silently lacks imagecreatefromjpeg() and friends.
+for feature in "JPEG Support" "WebP Support" "FreeType Support"; do
+    "$stage/php" -r "exit(gd_info()['$feature'] ? 0 : 1);" || { echo "PHP $VERSION's GD has no $feature" >&2; exit 1; }
 done
 check_deps "$stage/php" "$stage/php-fpm"
 # Every library compiled in (OpenSSL, ICU, libiconv, libmemcached...), as their licences require.

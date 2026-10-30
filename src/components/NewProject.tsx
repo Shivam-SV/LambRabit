@@ -71,6 +71,26 @@ const atLeast = (version: string, minimum: string) => {
   return true;
 };
 
+/**
+ * A template condition, read as the backend reads it (templates.rs): `database`, `!database`,
+ * `vars.x == y`, `vars.x != y`. Empty, "false" and "none" are false.
+ */
+function holds(condition: string | null, values: Record<string, string>) {
+  if (!condition) return true;
+  const text = condition.trim();
+  const name = (s: string) => s.trim().replace(/^\{\{|\}\}$/g, "").trim();
+  for (const [op, equal] of [["!=", false], ["==", true]] as const) {
+    const at = text.indexOf(op);
+    if (at >= 0) {
+      const value = text.slice(at + 2).trim().replace(/^["']|["']$/g, "");
+      return ((values[name(text.slice(0, at))] ?? "") === value) === equal;
+    }
+  }
+  const negate = text.startsWith("!");
+  const v = values[name(negate ? text.slice(1) : text)] ?? "";
+  return (v !== "" && v !== "false" && v !== "none") !== negate;
+}
+
 type Phase = { kind: "form" } | { kind: "running" } | { kind: "done"; url: string; note: string | null } | { kind: "failed"; error: string };
 
 export default function NewProject() {
@@ -115,10 +135,18 @@ export default function NewProject() {
   const dbMissing = dbUse === "required" && !hasDatabase;
   const tld = settings.data?.tld ?? "test";
   const domain = `${(name || "my-project").toLowerCase().replace(/_/g, "-")}.${tld}`;
+  // What conditions see: the database choice and the variables.
+  const conditionValues: Record<string, string> = {
+    database: withDb && dbUse !== "none" ? db : "",
+    ...Object.fromEntries(Object.entries(variables).map(([k, v]) => [`vars.${k}`, v])),
+  };
+  const shownVariables = (template?.variables ?? []).filter((v) => holds(v.when, conditionValues));
+  const shownOptional = (template?.optionalSteps ?? []).filter((o) => holds(o.when, conditionValues));
+  const missingRequired = shownVariables.some((v) => v.required && !(variables[v.id] ?? "").trim());
   // Risky steps count only when they'll run (optional ones can be unticked).
   const risks = (template?.risks ?? []).filter((r) => {
     const opt = template?.optionalSteps.find((o) => o.id === r.step);
-    return !opt || (optional[opt.id] ?? opt.default);
+    return !opt || (holds(opt.when, conditionValues) && (optional[opt.id] ?? opt.default));
   });
 
   // Reset when reopened; follow the HTTPS default.
@@ -173,9 +201,10 @@ export default function NewProject() {
       !needsPhp &&
       !phpTooOld &&
       !dbMissing &&
+      !missingRequired &&
       (!usesDb || /^[A-Za-z0-9_]{1,64}$/.test(db)) &&
       (risks.length === 0 || approved),
-    [template, name, taken, needsPhp, phpTooOld, dbMissing, usesDb, db, risks.length, approved],
+    [template, name, taken, needsPhp, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
   );
 
   if (!open) return null;
@@ -319,7 +348,7 @@ export default function NewProject() {
                   </select>
                 </label>
               )}
-              {template?.variables.map((v) => (
+              {shownVariables.map((v) => (
                 <label key={v.id} className={clsx("block", v.type === "bool" && "sm:col-span-2")}>
                   {v.type === "bool" ? (
                     <span className="flex items-center justify-between gap-4">
@@ -331,7 +360,10 @@ export default function NewProject() {
                     </span>
                   ) : (
                     <>
-                      <span className="mb-1.5 block text-sm font-semibold">{v.label}</span>
+                      <span className="mb-1.5 block text-sm font-semibold">
+                        {v.label}
+                        {v.required && <span className="text-danger-text"> *</span>}
+                      </span>
                       {v.type === "choice" ? (
                         <select className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))}>
                           {v.options.map((o) => (
@@ -386,7 +418,7 @@ export default function NewProject() {
                   )}
                 </div>
               )}
-              {template?.optionalSteps.map((o) => (
+              {shownOptional.map((o) => (
                 <label key={o.id} className="flex cursor-pointer items-center gap-3 px-4 py-3">
                   <input
                     type="checkbox"

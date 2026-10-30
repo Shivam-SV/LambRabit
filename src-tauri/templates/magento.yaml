@@ -1,0 +1,123 @@
+schema: 1
+id: magento
+name: Magento
+description: Magento Open Source (Mage-OS or Adobe's), installed with an admin account. Serve it with Apache.
+icon: boxes
+color: orange
+duration: Composer and installer · 10–15 minutes, ~1 GB
+requires:
+  php: "8.3"
+  extensions: [bcmath, ctype, curl, dom, fileinfo, gd, iconv, intl, mbstring, openssl, pdo_mysql, simplexml, soap, sockets, sodium, xsl, zip]
+database: required
+variables:
+  - id: source
+    label: Download from
+    type: choice
+    options: [mage-os, adobe]
+    default: mage-os
+    help: Mage-OS is the open-source distribution of Magento and needs no account. Adobe's needs Marketplace access keys (commercemarketplace.adobe.com → My profile → Access Keys).
+  - id: public_key
+    label: Adobe public key
+    if: vars.source == adobe
+    required: true
+  - id: private_key
+    label: Adobe private key
+    if: vars.source == adobe
+    required: true
+    help: Saved in lampRabit's Composer settings, so later composer updates work too.
+  - id: search
+    label: Search engine
+    type: choice
+    options: [none, opensearch]
+    default: none
+    help: Magento needs OpenSearch for catalog search. "none" installs without it (search pages won't work); pick opensearch if one is running.
+  - id: search_host
+    label: OpenSearch host
+    if: vars.search == opensearch
+    default: 127.0.0.1
+  - id: search_port
+    label: OpenSearch port
+    if: vars.search == opensearch
+    default: "9200"
+  - id: admin_user
+    label: Admin username
+    required: true
+    default: admin
+  - id: admin_password
+    label: Admin password
+    required: true
+    default: admin12345
+    help: At least 7 characters with letters and numbers.
+  - id: admin_email
+    label: Admin email
+    required: true
+    default: admin@example.com
+steps:
+  - create_database: {}
+
+  - name: Saving your Adobe access keys for Composer
+    if: vars.source == adobe
+    composer: [config, --global, http-basic.repo.magento.com, "{{vars.public_key}}", "{{vars.private_key}}"]
+
+  # Pinned to the 3.6 line: Mage-OS 4.0.0 (October 2026) requires module-admin-activity-log
+  # 2.0.4, which its repository doesn't have yet. Move to ^4.0 once it installs.
+  - name: Downloading Mage-OS with Composer (a few minutes)
+    if: vars.source == mage-os
+    cwd: www
+    composer: [create-project, --repository-url=https://repo.mage-os.org/, mage-os/project-community-edition, "{{project}}", "^3.6", --no-interaction, --no-progress]
+
+  - name: Downloading Magento with Composer (a few minutes)
+    if: vars.source == adobe
+    cwd: www
+    composer: [create-project, --repository-url=https://repo.magento.com/, magento/project-community-edition, "{{project}}", --no-interaction, --no-progress]
+
+  - name: Installing Magento (several minutes)
+    if: vars.search == none
+    php: [-d, memory_limit=-1, bin/magento, setup:install,
+          "--base-url={{url}}/", "--db-host={{db.host}}:{{db.port}}", "--db-name={{database}}",
+          "--db-user={{db.user}}", "--db-password={{db.password}}",
+          "--admin-firstname=Admin", "--admin-lastname=User", "--admin-email={{vars.admin_email}}",
+          "--admin-user={{vars.admin_user}}", "--admin-password={{vars.admin_password}}",
+          --language=en_US, --currency=USD, --timezone=UTC, --use-rewrites=1, --backend-frontname=admin,
+          "--disable-modules=Magento_Elasticsearch,Magento_Elasticsearch8,Magento_OpenSearch,Magento_InventoryElasticsearch",
+          --no-interaction]
+
+  - name: Installing Magento (several minutes)
+    if: vars.search == opensearch
+    php: [-d, memory_limit=-1, bin/magento, setup:install,
+          "--base-url={{url}}/", "--db-host={{db.host}}:{{db.port}}", "--db-name={{database}}",
+          "--db-user={{db.user}}", "--db-password={{db.password}}",
+          "--admin-firstname=Admin", "--admin-lastname=User", "--admin-email={{vars.admin_email}}",
+          "--admin-user={{vars.admin_user}}", "--admin-password={{vars.admin_password}}",
+          --language=en_US, --currency=USD, --timezone=UTC, --use-rewrites=1, --backend-frontname=admin,
+          --search-engine=opensearch, "--opensearch-host={{vars.search_host}}", "--opensearch-port={{vars.search_port}}",
+          --no-interaction]
+
+  - name: Switching to developer mode
+    php: [-d, memory_limit=-1, bin/magento, "deploy:mode:set", developer]
+
+  # Two-factor sign-in blocks the admin until email is set up; fine to skip locally.
+  - id: no-2fa
+    optional: true
+    label: Turn off two-factor sign-in for the admin (local use)
+    name: Turning off two-factor sign-in
+    if: vars.source == mage-os
+    php: [-d, memory_limit=-1, bin/magento, "module:disable", Magento_TwoFactorAuth]
+  - id: no-2fa-adobe
+    optional: true
+    label: Turn off two-factor sign-in for the admin (local use)
+    name: Turning off two-factor sign-in
+    if: vars.source == adobe
+    php: [-d, memory_limit=-1, bin/magento, "module:disable", Magento_AdminAdobeImsTwoFactorAuth, Magento_TwoFactorAuth]
+
+  - name: Clearing caches
+    php: [-d, memory_limit=-1, bin/magento, "cache:flush"]
+
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New Magento project
+done: "Shop at {{url}}, admin at {{url}}/admin ({{vars.admin_user}} / {{vars.admin_password}}). Magento serves from pub/ and needs Apache's .htaccess rules, so keep this site on Apache."

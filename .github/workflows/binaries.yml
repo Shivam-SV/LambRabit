@@ -16,6 +16,14 @@ on:
         description: "Rebuild and replace builds that are already published"
         type: boolean
         default: false
+      only:
+        description: "With rebuild: only these runtimes, space-separated (e.g. php); empty for all"
+        type: string
+        default: ""
+      publish:
+        description: "Publish to the binaries release (untick to only test that the builds work)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -39,14 +47,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REBUILD: ${{ inputs.rebuild || false }}
+          ONLY: ${{ inputs.only || '' }}
         run: |
           . build/linux/versions.env
           gh release download "$RELEASE_TAG" -p manifest.json -D /tmp 2>/dev/null || echo '{"releases":[]}' > /tmp/manifest.json
           export NGINX_VERSIONS APACHE_VERSIONS PHP_LINES PHP_LINES_NOT_MACOS REDIS_VERSIONS MEMCACHED_VERSIONS
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os, urllib.request
-          have = set() if os.environ["REBUILD"] == "true" else {
-              (e["runtime"], e["version"], e.get("os", "linux"), e["arch"]) for e in json.load(open("/tmp/manifest.json"))["releases"]}
+          have = {(e["runtime"], e["version"], e.get("os", "linux"), e["arch"]) for e in json.load(open("/tmp/manifest.json"))["releases"]}
+          if os.environ["REBUILD"] == "true":
+              # Everything, or only the runtimes named (a build-script fix for one of them).
+              only = os.environ["ONLY"].split()
+              have = {h for h in have if only and h[0] not in only}
           wanted = [("nginx", v) for v in os.environ["NGINX_VERSIONS"].split()]
           wanted += [("apache", v) for v in os.environ["APACHE_VERSIONS"].split()]
           wanted += [("redis", v) for v in os.environ["REDIS_VERSIONS"].split()]
@@ -114,8 +126,9 @@ jobs:
 
   publish:
     needs: build
-    # Publishes whatever built, so one failing PHP line doesn't hold back the rest.
-    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    # Publishes whatever built, so one failing PHP line doesn't hold back the rest. A manual
+    # run can skip it to test build-script changes from a branch.
+    if: ${{ !cancelled() && needs.build.result != 'skipped' && (github.event_name != 'workflow_dispatch' || inputs.publish) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

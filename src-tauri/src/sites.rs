@@ -27,7 +27,7 @@ pub struct Site {
     pub domain: String,
     pub path: PathBuf,
     /// Served directory: `public/` when the project has one (Laravel, Symfony...), `web/`
-    /// (Drupal) or `webroot/` (CakePHP) when they hold an index.php.
+    /// (Drupal), `webroot/` (CakePHP) or `pub/` (Magento) when they hold an index.php.
     pub docroot: PathBuf,
     pub ssl: bool,
     pub url: String,
@@ -64,6 +64,8 @@ fn project_info(dir: &Path) -> (Option<&'static str>, Option<String>, Option<Str
         Some("WordPress")
     } else if requires("symfony/framework-bundle") || dir.join("symfony.lock").exists() {
         Some("Symfony")
+    } else if dir.join("bin/magento").exists() || requires("magento/product-community-edition") || requires("mage-os/product-community-edition") {
+        Some("Magento")
     } else if requires("drupal/core") || requires("drupal/core-recommended") {
         Some("Drupal")
     } else if requires("codeigniter4/framework") {
@@ -563,7 +565,7 @@ fn docroot(dir: &Path) -> PathBuf {
     if dir.join("public").is_dir() {
         return dir.join("public");
     }
-    ["web", "webroot"].iter().map(|d| dir.join(d)).find(|d| d.join("index.php").exists()).unwrap_or_else(|| dir.to_path_buf())
+    ["web", "webroot", "pub"].iter().map(|d| dir.join(d)).find(|d| d.join("index.php").exists()).unwrap_or_else(|| dir.to_path_buf())
 }
 
 pub fn hosts_file() -> PathBuf {
@@ -719,7 +721,7 @@ mod tests {
     #[test]
     fn docroot_follows_the_framework_layout() {
         let base = std::env::temp_dir().join(format!("lamprabit-docroot-{}", std::process::id()));
-        for (project, folder) in [("laravel", "public"), ("drupal", "web"), ("cake", "webroot")] {
+        for (project, folder) in [("laravel", "public"), ("drupal", "web"), ("cake", "webroot"), ("magento", "pub")] {
             std::fs::create_dir_all(base.join(project).join(folder)).unwrap();
             std::fs::write(base.join(project).join(folder).join("index.php"), "").unwrap();
             assert_eq!(docroot(&base.join(project)), base.join(project).join(folder));

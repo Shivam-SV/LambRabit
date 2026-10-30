@@ -26,6 +26,7 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("cakephp.yaml", include_str!("../templates/cakephp.yaml")),
     ("codeigniter.yaml", include_str!("../templates/codeigniter.yaml")),
     ("drupal.yaml", include_str!("../templates/drupal.yaml")),
+    ("magento.yaml", include_str!("../templates/magento.yaml")),
     ("statamic.yaml", include_str!("../templates/statamic.yaml")),
     ("static.yaml", include_str!("../templates/static.yaml")),
 ];
@@ -100,6 +101,12 @@ pub struct Variable {
     pub options: Vec<String>,
     #[serde(default)]
     pub default: Option<String>,
+    /// Shown (and used) only when this holds, like a step's `if:`.
+    #[serde(default, rename(deserialize = "if"))]
+    pub when: Option<String>,
+    /// The wizard won't create the project while it's empty (when shown).
+    #[serde(default)]
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -364,6 +371,9 @@ impl Template {
             if v.kind == VariableKind::Choice && v.options.is_empty() {
                 return Err(Error::msg(format!("variable {} is a choice without options", v.id)));
             }
+            if let Some(when) = &v.when {
+                parse_condition(when).map_err(|e| Error::msg(format!("variable {}: {e}", v.id)))?;
+            }
         }
         Ok(())
     }
@@ -570,6 +580,8 @@ pub struct OptionalStep {
     pub id: String,
     pub label: String,
     pub default: bool,
+    /// The step's `if:`; the wizard hides the checkbox while it doesn't hold.
+    pub when: Option<String>,
 }
 
 /// A user template that couldn't be read, with why.
@@ -635,7 +647,12 @@ pub fn catalog(layout: &Layout) -> Catalog {
                 .iter()
                 .enumerate()
                 .filter(|(_, s)| s.optional)
-                .map(|(i, s)| OptionalStep { id: s.key(i), label: s.label.clone().unwrap_or_else(|| s.heading()), default: s.default.unwrap_or(true) })
+                .map(|(i, s)| OptionalStep {
+                    id: s.key(i),
+                    label: s.label.clone().unwrap_or_else(|| s.heading()),
+                    default: s.default.unwrap_or(true),
+                    when: s.when.clone(),
+                })
                 .collect(),
             id: t.id.clone(),
             name: t.name.clone(),

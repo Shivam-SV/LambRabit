@@ -40,6 +40,7 @@ const frameworkStyle: Record<string, string> = {
   Yii: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-400",
   Slim: "bg-teal-500/12 text-teal-700 dark:text-teal-400",
   Statamic: "bg-pink-500/12 text-pink-600 dark:text-pink-400",
+  Magento: "bg-orange-600/12 text-orange-700 dark:text-orange-400",
   PHP: "bg-indigo-500/12 text-indigo-600 dark:text-indigo-400",
   Static: "bg-surface-2 text-muted",
 };

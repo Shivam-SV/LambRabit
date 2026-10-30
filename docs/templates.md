@@ -109,7 +109,13 @@ variables:
     options: [blade, react, vue]
     default: blade
     help: Shown under the field.
+    required: true       # Create stays disabled while it's empty
+  - id: api_key
+    label: API key
+    if: vars.stack == react   # shown (and filled in) only while this holds; empty otherwise
 ```
+
+Optional steps with an `if:` show their checkbox only while the condition holds, so a template can offer one step per choice (Magento's two-factor switch differs between Mage-OS and Adobe's edition).
 
 ### Steps
 

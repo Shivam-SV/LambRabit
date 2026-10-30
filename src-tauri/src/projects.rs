@@ -132,7 +132,9 @@ async fn run(ctx: &Ctx<'_>, program: &Path, args: &[String], cwd: &Path, extra_p
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("COMPOSER_HOME", ctx.layout.data("composer"))
-        .env("COMPOSER_NO_INTERACTION", "1");
+        .env("COMPOSER_NO_INTERACTION", "1")
+        // Large dependency trees (Magento) need more than PHP's default memory limit.
+        .env("COMPOSER_MEMORY_LIMIT", "-1");
     if !extra_path.is_empty() {
         let existing = std::env::var_os("PATH").unwrap_or_default();
         let paths = extra_path.iter().cloned().chain(std::env::split_paths(&existing));
@@ -309,7 +311,17 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
         let value = req.variables.get(&v.id).cloned().or_else(|| v.default.clone()).unwrap_or_default();
         map.insert(format!("vars.{}", v.id), value);
     }
-    Values(map)
+    // Variables shown only under a condition (Adobe's keys for Adobe's download) are empty
+    // otherwise, so nothing leaks into steps that don't apply.
+    let mut values = Values(map);
+    for v in &template.variables {
+        if let Some(when) = &v.when {
+            if !values.holds(when).unwrap_or(true) {
+                values.0.insert(format!("vars.{}", v.id), String::new());
+            }
+        }
+    }
+    values
 }
 
 /// Whether a step runs: optional ones as chosen in the wizard, then its `if:`.
@@ -469,6 +481,12 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
         false => None,
     };
     let values = values(ctx, req, template, url, php_version.as_deref());
+    for v in template.variables.iter().filter(|v| v.required) {
+        let shown = v.when.as_deref().is_none_or(|w| values.holds(w).unwrap_or(true));
+        if shown && values.get(&format!("vars.{}", v.id)).trim().is_empty() {
+            return Err(Error::msg(format!("Fill in \"{}\" for this template.", v.label)));
+        }
+    }
     let mut steps = Vec::new();
     for (i, step) in template.steps.iter().enumerate() {
         if enabled(step, i, req, &values)? {
