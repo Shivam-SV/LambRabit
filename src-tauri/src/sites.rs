@@ -581,6 +581,16 @@ fn managed_domains(hosts: &str) -> BTreeSet<String> {
     domains
 }
 
+/// Whether the hosts file has lampRabit's block (so removing it is worth a prompt).
+pub fn hosts_has_block() -> bool {
+    std::fs::read(hosts_file()).is_ok_and(|h| String::from_utf8_lossy(&h).lines().any(|l| l.trim() == HOSTS_BEGIN))
+}
+
+/// The hosts file without lampRabit's block, everything else byte for byte.
+pub fn hosts_without_block(current: &[u8]) -> Vec<u8> {
+    render_hosts(current, &[])
+}
+
 pub fn hosts_in_sync(sites: &[Site]) -> bool {
     let wanted: BTreeSet<String> = sites.iter().map(|s| s.domain.clone()).collect();
     std::fs::read(hosts_file()).is_ok_and(|h| managed_domains(&String::from_utf8_lossy(&h)) == wanted)

@@ -296,6 +296,18 @@ export interface Usage {
   processes: number;
 }
 
+/** Removing lampRabit: folders deleted and kept (Settings → Troubleshooting). */
+export interface UninstallPlan {
+  remove: string[];
+  keep: string[];
+}
+
+export interface UninstallReport {
+  kept: string[];
+  /** What couldn't be undone, each saying what to do. */
+  problems: string[];
+}
+
 export interface EnvPaths {
   root: string;
   www: string;
@@ -349,6 +361,8 @@ export const api = {
   applyServices: (start: ServiceKind[], stop: ServiceKind[]) => invoke<string[]>("apply_services", { start, stop }),
   serviceUsage: () => invoke<Usage[]>("service_usage"),
   stopAll: () => invoke<void>("stop_all"),
+  uninstallPlan: () => invoke<UninstallPlan>("uninstall_plan"),
+  uninstall: () => invoke<UninstallReport>("uninstall"),
   checkPort: (port: number) => invoke<boolean>("check_port", { port }),
   portStatus: () => invoke<PortStatus[]>("port_status"),
   stopProcess: (pid: number) => invoke<void>("stop_process", { pid }),

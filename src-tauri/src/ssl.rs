@@ -154,6 +154,28 @@ fn linux_store() -> Option<(PathBuf, &'static str)> {
     .find(|(dir, _)| dir.is_dir())
 }
 
+/// Where the CA is copied in the Linux system store, and the command that rebuilds the
+/// store; for removing it again.
+pub fn linux_trusted_copy() -> Option<(PathBuf, &'static str)> {
+    linux_store().map(|(dir, update)| (dir.join(LINUX_FILE), update))
+}
+
+fn certutil(db: &Path) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("certutil");
+    cmd.arg("-d").arg(format!("sql:{}", db.display()));
+    cmd
+}
+
+/// Firefox profiles' NSS databases (snap and Flatpak installs included).
+fn firefox_dbs(home: &Path) -> Vec<PathBuf> {
+    [".mozilla/firefox", "snap/firefox/common/.mozilla/firefox", ".var/app/org.mozilla.firefox/.mozilla/firefox"]
+        .into_iter()
+        .flat_map(|profiles| std::fs::read_dir(home.join(profiles)).into_iter().flatten().flatten())
+        .map(|entry| entry.path())
+        .filter(|p| p.join("cert9.db").exists())
+        .collect()
+}
+
 /// Chrome, Chromium and Firefox on Linux ignore the system store and read NSS databases:
 /// the shared ~/.pki/nssdb and one per Firefox profile. Needs `certutil` (libnss3-tools).
 /// Returns a note when browsers couldn't be covered.
@@ -164,28 +186,52 @@ async fn trust_in_browsers(crt: &Path) -> Option<String> {
             "Trusted by the system. Chrome and Firefox keep their own certificate lists: install certutil (sudo apt install libnss3-tools, or nss-tools on Fedora) and click Trust again to add it there.".into(),
         );
     }
-    let certutil = |db: &Path| {
-        let mut cmd = tokio::process::Command::new("certutil");
-        cmd.arg("-d").arg(format!("sql:{}", db.display()));
-        cmd
-    };
     let shared = home.join(".pki/nssdb");
     if !shared.join("cert9.db").exists() {
         let _ = std::fs::create_dir_all(&shared);
         let _ = certutil(&shared).args(["-N", "--empty-password"]).output().await;
     }
-    let mut dbs = vec![shared];
-    for profiles in [".mozilla/firefox", "snap/firefox/common/.mozilla/firefox", ".var/app/org.mozilla.firefox/.mozilla/firefox"] {
-        for entry in std::fs::read_dir(home.join(profiles)).into_iter().flatten().flatten() {
-            if entry.path().join("cert9.db").exists() {
-                dbs.push(entry.path());
-            }
-        }
-    }
-    for db in dbs {
+    for db in std::iter::once(shared).chain(firefox_dbs(&home)) {
         let _ = certutil(&db).args(["-A", "-t", "C,,", "-n", CA_NAME, "-i"]).arg(crt).output().await;
     }
     None
+}
+
+/// Removes the CA from the browsers' NSS databases on Linux (no administrator rights needed).
+pub async fn untrust_in_browsers() {
+    let Some(home) = dirs::home_dir() else { return };
+    for db in std::iter::once(home.join(".pki/nssdb")).chain(firefox_dbs(&home)) {
+        // certutil removes one copy per call; a database never holds more than a couple.
+        for _ in 0..3 {
+            match certutil(&db).args(["-D", "-n", CA_NAME]).output().await {
+                Ok(o) if o.status.success() => continue,
+                _ => break,
+            }
+        }
+    }
+}
+
+/// Removes the CA from the current user's trust store on Windows and macOS (each shows its
+/// own confirmation). Linux needs administrator rights and is done by the uninstall script.
+pub async fn untrust_ca(layout: &Layout) -> Result<()> {
+    let Some(thumb) = ca_thumbprint(layout) else { return Ok(()) };
+    let output = if cfg!(windows) {
+        let mut cmd = tokio::process::Command::new("certutil");
+        cmd.args(["-user", "-delstore", "Root", &thumb]);
+        crate::procgroup::prepare(&mut cmd);
+        cmd.output().await?
+    } else if cfg!(target_os = "macos") {
+        let keychain = dirs::home_dir().unwrap_or_default().join("Library/Keychains/login.keychain-db");
+        tokio::process::Command::new("security").args(["delete-certificate", "-Z", &thumb]).arg(keychain).output().await?
+    } else {
+        return Ok(());
+    };
+    if !output.status.success() {
+        return Err(Error::msg(format!(
+            "The certificate \"{CA_NAME}\" was not removed (the prompt may have been cancelled). Remove it from your certificate store by hand."
+        )));
+    }
+    Ok(())
 }
 
 /// Adds the CA to the current user's trust store. Windows and macOS show their own

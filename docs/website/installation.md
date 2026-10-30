@@ -92,13 +92,15 @@ On Linux, normal users can't listen on ports below 1024. The first time Apache o
 
 ## Uninstall
 
-1. Click **Stop all**, then quit lampRabit.
-2. Uninstall the app (Windows: Settings → Apps; macOS: drag to Trash; Linux: `sudo apt remove lamprabit` or delete the AppImage).
-3. Delete the environment folder (`C:\lampRabit` or `~/lampRabit`) if you don't need your projects and databases. **Back up `www/` and your databases first.**
-4. Remove the certificate authority:
-   - Windows: run `certmgr.msc` → Trusted Root Certification Authorities → Certificates → delete **lampRabit Local CA**.
-   - macOS: Keychain Access → login → delete **lampRabit Local CA**.
-5. Remove the hosts entries: delete the block between `# lampRabit begin` and `# lampRabit end` in the hosts file (Windows: `C:\Windows\System32\drivers\etc\hosts`, as administrator; macOS/Linux: `/etc/hosts` with `sudo`).
+Uninstalling removes everything lampRabit set up and **keeps your projects (`www/`) and databases (`data/`)**, so a later install picks them up again. It deletes the runtimes, configs, logs and certificates in the environment folder (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`; nothing else in that folder is touched), lampRabit's settings, the `.test` entries in the hosts file, the trusted "lampRabit Local CA" certificate, lampRabit's commands on your PATH, the saved ngrok token and starting with your computer.
+
+- **Windows:** Settings → Apps → lampRabit → Uninstall. The uninstaller asks you to close lampRabit, then does the cleanup; Windows asks for confirmation for the hosts file and the certificate. (Updating lampRabit never runs this.)
+- **macOS and Linux:** in lampRabit, open Settings → Troubleshooting → **Remove lampRabit from this computer**. It shows what is deleted and kept before doing anything, then quits. Afterwards move lampRabit to the Trash (macOS), or delete the AppImage / run `sudo apt remove lamprabit` (Linux). On Linux your password is asked once, for the hosts file, the certificate and the ports 80/443 setting.
+- The same Settings action works on Windows too, if you'd rather clean up before uninstalling.
+
+To delete your projects and databases as well, delete the environment folder (`C:\lampRabit` or `~/lampRabit`) afterwards. Back up `www/` and `data/` first if you might need them.
+
+If something couldn't be undone (for example a cancelled administrator prompt), lampRabit lists it with what to do by hand.
 
 ## Building from source
 
