@@ -26,7 +26,8 @@ pub struct Site {
     pub name: String,
     pub domain: String,
     pub path: PathBuf,
-    /// Served directory: `public/` when the project has one (Laravel, Symfony, ...).
+    /// Served directory: `public/` when the project has one (Laravel, Symfony...), `web/`
+    /// (Drupal), `webroot/` (CakePHP) or `pub/` (Magento) when they hold an index.php.
     pub docroot: PathBuf,
     pub ssl: bool,
     pub url: String,
@@ -54,12 +55,17 @@ fn project_info(dir: &Path) -> (Option<&'static str>, Option<String>, Option<Str
     let read = |f: &str| std::fs::read_to_string(dir.join(f)).ok();
     let composer = read("composer.json").unwrap_or_default();
     let requires = |pkg: &str| composer.contains(&format!("\"{pkg}\""));
-    let framework = if dir.join("artisan").exists() || requires("laravel/framework") {
+    // Statamic is a Laravel app, so it's checked first.
+    let framework = if requires("statamic/cms") {
+        Some("Statamic")
+    } else if dir.join("artisan").exists() || requires("laravel/framework") {
         Some("Laravel")
     } else if dir.join("wp-config.php").exists() || dir.join("wp-login.php").exists() {
         Some("WordPress")
     } else if requires("symfony/framework-bundle") || dir.join("symfony.lock").exists() {
         Some("Symfony")
+    } else if dir.join("bin/magento").exists() || requires("magento/product-community-edition") || requires("mage-os/product-community-edition") {
+        Some("Magento")
     } else if requires("drupal/core") || requires("drupal/core-recommended") {
         Some("Drupal")
     } else if requires("codeigniter4/framework") {
@@ -282,8 +288,7 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             }
             let domain = format!("{}.{}", label(&name)?, settings.tld);
             let path = e.path();
-            let public = path.join("public");
-            let docroot = if public.is_dir() { public } else { path.clone() };
+            let docroot = docroot(&path);
             let own = settings.sites.get(&name);
             let ssl = own.and_then(|s| s.ssl).unwrap_or(settings.https_by_default);
             let php = own.and_then(|s| s.php.clone());
@@ -555,6 +560,14 @@ pub fn config_stale(settings: &Settings, layout: &Layout, sites: &[Site], plan: 
         != Some(&render(settings, layout, sites, plan, server))
 }
 
+/// The folder a project serves from.
+fn docroot(dir: &Path) -> PathBuf {
+    if dir.join("public").is_dir() {
+        return dir.join("public");
+    }
+    ["web", "webroot", "pub"].iter().map(|d| dir.join(d)).find(|d| d.join("index.php").exists()).unwrap_or_else(|| dir.to_path_buf())
+}
+
 pub fn hosts_file() -> PathBuf {
     if cfg!(windows) {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -704,6 +717,20 @@ pub async fn update_hosts(layout: &Layout, sites: &[Site]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docroot_follows_the_framework_layout() {
+        let base = std::env::temp_dir().join(format!("lamprabit-docroot-{}", std::process::id()));
+        for (project, folder) in [("laravel", "public"), ("drupal", "web"), ("cake", "webroot"), ("magento", "pub")] {
+            std::fs::create_dir_all(base.join(project).join(folder)).unwrap();
+            std::fs::write(base.join(project).join(folder).join("index.php"), "").unwrap();
+            assert_eq!(docroot(&base.join(project)), base.join(project).join(folder));
+        }
+        // A folder named web without an index.php is just a folder.
+        std::fs::create_dir_all(base.join("plain/web")).unwrap();
+        assert_eq!(docroot(&base.join("plain")), base.join("plain"));
+        let _ = std::fs::remove_dir_all(base);
+    }
     use crate::config::Server;
 
     fn site(domain: &str) -> Site {

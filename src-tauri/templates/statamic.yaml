@@ -1,0 +1,29 @@
+schema: 1
+id: statamic
+name: Statamic
+description: Flat-file CMS on Laravel, no database needed.
+icon: zap
+color: pink
+duration: Composer · about a minute
+requires:
+  php: "8.2"
+  extensions: [ctype, fileinfo, mbstring, openssl, tokenizer, xml]
+steps:
+  - name: Creating the project with Composer (statamic/statamic)
+    cwd: www
+    composer: [create-project, statamic/statamic, "{{project}}", --prefer-dist, --no-interaction, --no-progress]
+  - name: Configuring the environment
+    env:
+      values:
+        APP_URL: "{{url}}"
+        MAIL_MAILER: smtp
+        MAIL_HOST: "{{mail.host}}"
+        MAIL_PORT: "{{mail.port}}"
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New Statamic project
+done: "Create your first user with php please make:user in the project's terminal, then sign in at {{url}}/cp."

@@ -15,6 +15,7 @@ mod services;
 mod shims;
 mod sites;
 mod ssl;
+mod templates;
 mod tunnels;
 mod uninstall;
 
@@ -646,12 +647,13 @@ async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: Strin
     restart_web_servers(&app, &state).await
 }
 
-/// Creates a project in www/ from a preset and returns its URL. Progress is streamed as
+/// Creates a project in www/ from a template and returns its URL. Progress is streamed as
 /// `project-progress` events; a failed project is removed so it can be retried.
 #[tauri::command]
-async fn create_project(app: AppHandle, state: State<'_, AppState>, request: projects::NewProject) -> Result<String> {
+async fn create_project(app: AppHandle, state: State<'_, AppState>, request: projects::NewProject) -> Result<CreatedProject> {
     let (_, layout) = state.snapshot().await;
     projects::validate(&request, &layout)?;
+    let (template, source) = templates::find(&layout, &request.template)?;
     let name = request.name.trim().to_string();
     state
         .update_settings(|s| {
@@ -659,15 +661,17 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
             site.php = request.php.clone();
             site.server = request.server;
             site.ssl = Some(request.ssl);
+            site.template = Some(format!("{}@{}", template.id, template.version));
         })
         .await?;
     let (settings, layout) = state.snapshot().await;
     let url = sites::url_for(&settings, &name).ok_or_else(|| Error::msg("invalid project name"))?;
     let ctx = projects::Ctx { app: &app, http: &state.http, settings: &settings, layout: &layout, name: &name };
-    logs::system(&app, logs::Level::Info, format!("Creating project {name} ({:?})", request.preset));
+    logs::system(&app, logs::Level::Info, format!("Creating project {name} from the {} template", template.name));
 
     let result = async {
-        if let Some(db) = &request.database {
+        let creates_database = template.steps.iter().any(|s| matches!(s.action, templates::Action::CreateDatabase(_)));
+        if request.database.is_some() && creates_database {
             let server = settings.database().ok_or_else(|| Error::msg("Install MariaDB or MySQL first (Services)."))?;
             let kind = database_service(server);
             if !state.supervisor.is_running(kind).await {
@@ -681,24 +685,53 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
-            projects::create_database(&ctx, db).await?;
         }
-        projects::build(&ctx, &request, &url).await
+        projects::build(&ctx, &request, &template, source, &url).await
     }
     .await;
 
-    if let Err(e) = result {
-        let _ = std::fs::remove_dir_all(layout.www().join(&name));
-        state.update_settings(|s| { s.sites.remove(&name); }).await?;
-        logs::system(&app, logs::Level::Error, format!("Creating project {name} failed: {e}"));
-        return Err(e);
-    }
+    let note = match result {
+        Ok(note) => note,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(layout.www().join(&name));
+            state.update_settings(|s| { s.sites.remove(&name); }).await?;
+            logs::system(&app, logs::Level::Error, format!("Creating project {name} failed: {e}"));
+            return Err(e);
+        }
+    };
     // Composer may have just been installed; this makes it the active version and adds its shim.
     state.update_settings(reconcile_versions).await?;
     ctx.step("Adding the site to the web server");
     restart_web_servers(&app, &state).await?;
     logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
-    Ok(url)
+    Ok(CreatedProject { url, note })
+}
+
+#[derive(Serialize)]
+struct CreatedProject {
+    url: String,
+    /// The template's "what next", e.g. finishing the WordPress installer.
+    note: Option<String>,
+}
+
+/// Every project template: built-in, then the user's, with those that couldn't be read.
+#[tauri::command]
+async fn list_templates(state: State<'_, AppState>) -> Result<templates::Catalog> {
+    let (_, layout) = state.snapshot().await;
+    Ok(templates::catalog(&layout))
+}
+
+/// Opens the folder for your own templates, creating it with an example the first time.
+#[tauri::command]
+async fn open_templates_folder(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let (_, layout) = state.snapshot().await;
+    let dir = templates::folder(&layout);
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join("example.yaml.txt"), templates::EXAMPLE)?;
+    }
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| Error::msg(e.to_string()))
 }
 
 /// Shares a site (by folder name) or a local port on a public URL.
@@ -1519,6 +1552,8 @@ pub fn run() {
             stop_all,
             uninstall_plan,
             uninstall,
+            list_templates,
+            open_templates_folder,
             apply_services,
             service_usage,
             check_port,

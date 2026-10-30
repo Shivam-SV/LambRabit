@@ -1,0 +1,35 @@
+schema: 1
+id: blank
+name: Blank PHP
+description: An index.php to start from.
+icon: code
+color: indigo
+duration: Instant
+requires:
+  php: any
+steps:
+  - name: Creating files
+    write:
+      path: index.php
+      content: |
+        <?php
+        // {{project}}: served at {{url}}
+        ?>
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <title>{{project}}</title>
+        </head>
+        <body>
+          <h1>{{project}}</h1>
+          <p>Running PHP <?= PHP_VERSION ?>. Edit www/{{project}}/index.php to get started.</p>
+        </body>
+        </html>
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New project

@@ -1,0 +1,30 @@
+schema: 1
+id: static
+name: Static site
+description: Plain HTML, no PHP.
+icon: file
+color: amber
+duration: Instant
+steps:
+  - name: Creating files
+    write:
+      path: index.html
+      content: |
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <title>{{project}}</title>
+        </head>
+        <body>
+          <h1>{{project}}</h1>
+          <p>Edit www/{{project}}/index.html to get started.</p>
+        </body>
+        </html>
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New project
