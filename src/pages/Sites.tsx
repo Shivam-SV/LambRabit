@@ -39,6 +39,7 @@ const frameworkStyle: Record<string, string> = {
   CakePHP: "bg-rose-500/12 text-rose-600 dark:text-rose-400",
   Yii: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-400",
   Slim: "bg-teal-500/12 text-teal-700 dark:text-teal-400",
+  Statamic: "bg-pink-500/12 text-pink-600 dark:text-pink-400",
   PHP: "bg-indigo-500/12 text-indigo-600 dark:text-indigo-400",
   Static: "bg-surface-2 text-muted",
 };
@@ -190,7 +191,7 @@ export default function Sites() {
             <div className="text-lg font-semibold">No sites yet</div>
             <p className="max-w-md text-muted">
               Create a folder inside <span className="font-mono">www</span> with an <span className="font-mono">index.php</span>, or start from a
-              preset: Laravel, Symfony, WordPress, a blank PHP or static site.
+              template: Laravel, Symfony, WordPress, Drupal, a blank PHP or static site, and more.
             </p>
             <Button variant="primary" onClick={() => openNewProject(true)}>
               <FolderPlus size={16} /> New project
@@ -371,7 +372,7 @@ function ProjectCard({ site, info }: { site: Site; info?: SitesInfo }) {
       </div>
       <p className="mt-2 text-sm text-muted">
         {site.framework === "PHP" ? "Plain PHP" : site.framework ?? "Folder"} <span aria-hidden>·</span> PHP {php ?? "—"} <span aria-hidden>·</span> {serviceLabels[site.server]}
-        {site.docroot !== site.path && <> <span aria-hidden>·</span> serves public/</>}
+        {site.docroot !== site.path && <> <span aria-hidden>·</span> serves {site.docroot.split(/[\\/]/).pop()}/</>}
       </p>
       <ul className="mt-4 flex flex-wrap gap-x-4 gap-y-3 text-sm text-muted">
         {site.gitBranch && (

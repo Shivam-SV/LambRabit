@@ -184,15 +184,56 @@ export interface NodeRelease {
   lts: string | null;
 }
 
-export type Preset = "blank" | "static" | "laravel" | "symfony" | "wordpress";
-
 export interface NewProject {
   name: string;
-  preset: Preset;
+  /** A template id from listTemplates. */
+  template: string;
   php: string | null;
   server: Server | null;
   ssl: boolean;
   database: string | null;
+  /** Values for the template's variables, by id. */
+  variables: Record<string, string>;
+  /** Optional steps by id: run or not. */
+  optional: Record<string, boolean>;
+  /** The user accepted the risky steps of a template that didn't ship with lampRabit. */
+  approveRisky: boolean;
+}
+
+export interface TemplateVariable {
+  id: string;
+  label: string;
+  help: string | null;
+  type: "text" | "choice" | "bool";
+  options: string[];
+  default: string | null;
+}
+
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  version: number;
+  icon: string | null;
+  color: string | null;
+  duration: string | null;
+  source: "builtin" | "user";
+  path: string | null;
+  usesPhp: boolean;
+  minPhp: string | null;
+  extensions: string[];
+  database: "none" | "optional" | "required";
+  variables: TemplateVariable[];
+  optionalSteps: { id: string; label: string; default: boolean }[];
+  /** Steps needing approval (templates you added yourself). */
+  risks: { step: string; heading: string; command: string; reasons: string[] }[];
+  done: string | null;
+}
+
+export interface TemplateCatalog {
+  templates: ProjectTemplate[];
+  broken: { file: string; error: string }[];
+  folder: string;
 }
 
 export interface ProjectProgress {
@@ -331,7 +372,9 @@ export const api = {
   setSitePhp: (name: string, version: string | null) => invoke<void>("set_site_php", { name, version }),
   setSiteServer: (name: string, server: Server | null) => invoke<void>("set_site_server", { name, server }),
   phpStatus: () => invoke<PoolStatus[]>("php_status"),
-  createProject: (request: NewProject) => invoke<string>("create_project", { request }),
+  createProject: (request: NewProject) => invoke<{ url: string; note: string | null }>("create_project", { request }),
+  listTemplates: () => invoke<TemplateCatalog>("list_templates"),
+  openTemplatesFolder: () => invoke<void>("open_templates_folder"),
   tunnelStart: (provider: TunnelProvider, site: string | null, port: number | null) =>
     invoke<Tunnel>("tunnel_start", { provider, site, port }),
   tunnelStop: (id: string) => invoke<void>("tunnel_stop", { id }),

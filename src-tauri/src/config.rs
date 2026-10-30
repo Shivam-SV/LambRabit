@@ -100,6 +100,8 @@ pub struct SiteSettings {
     pub php: Option<String>,
     /// Web server for this site when both are enabled.
     pub server: Option<Server>,
+    /// The template it was created from, as "id@version".
+    pub template: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

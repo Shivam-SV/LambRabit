@@ -1,0 +1,45 @@
+schema: 1
+id: wordpress
+name: WordPress
+description: Latest WordPress with wp-config.php ready.
+icon: newspaper
+color: sky
+duration: Download · ~30 MB
+requires:
+  php: "7.4"
+  extensions: [mysqli]
+database: optional
+steps:
+  - create_database: {}
+  - name: Downloading WordPress
+    download:
+      url: https://wordpress.org/latest.zip
+      sha1_url: https://wordpress.org/latest.zip.sha1
+      extract: true
+      strip: wordpress
+  - name: Writing wp-config.php
+    copy:
+      from: wp-config-sample.php
+      to: wp-config.php
+  - name: Writing wp-config.php
+    if: database
+    replace:
+      file: wp-config.php
+      values:
+        database_name_here: "{{database}}"
+  - name: Writing wp-config.php
+    if: "!database"
+    replace:
+      file: wp-config.php
+      values:
+        database_name_here: wordpress
+  - name: Writing wp-config.php
+    replace:
+      file: wp-config.php
+      values:
+        username_here: "{{db.user}}"
+        "'password_here'": "'{{db.password}}'"
+        "'localhost'": "'{{db.host}}:{{db.port}}'"
+        # Fresh authentication keys and salts: each occurrence gets its own.
+        put your unique phrase here: "{{random:64}}"
+done: Open the site to finish the WordPress installation (site title and admin account).

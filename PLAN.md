@@ -39,7 +39,7 @@ bin/<runtime>/<version>/   etc/<runtime>/   www/   data/mariadb/   logs/   tmp/ 
 - [ ] **14. Movable tab bar**
 - [ ] **15. More databases: PostgreSQL, MongoDB, SQLite, backups**
 - [ ] **16. More services: search, storage, queues, n8n, Ollama**
-- [ ] **17. Templates and more frameworks**
+- [x] **17. Templates and more frameworks** (first part; Node templates and recording wait for phase 12)
 - [ ] **18. Onboarding**
 - [ ] **19. Project doctor**
 - [ ] **20. Headless core and the `lamprabit` CLI**
@@ -160,6 +160,8 @@ Same standards as existing runtimes: catalog per OS/arch with checksums, data un
 6. Ollama (detect an existing install first; often installed by the user)
 
 ## Phase 17: templates and more frameworks
+
+Done (2026-10-30): YAML templates (`src-tauri/templates/`, user ones in `<root>/templates/`, reference in docs/templates.md) with variables, optional steps, `if:` conditions, requirement checks, risky-step approval for user templates, and the steps `composer`, `php`, `run`, `download`, `write`, `append`, `copy`, `env`, `replace`, `create_database`, `git_init`. Built in: the five presets plus CakePHP, CodeIgniter, Drupal and Statamic, each verified by creating a project in WSL. The site records `template = "id@version"`. Still to do: Node templates (Vite, Next.js, Express) once phase 12 serves Node projects, extra domains, Magento, the template creation wizard, recording a setup as a template.
 
 - The hard-coded `Preset` enum becomes declarative, versioned templates (built in plus a user folder): variables with defaults and validation, prerequisites (PHP ≥, extensions, Node, a database), steps (`composer create-project`, commands, `.env` keys, create database, domains/processes from phase 12, git init), live output, cleanup on failure. The five current presets are ported first, behaving the same.
 - New: CakePHP, CodeIgniter 4, Drupal, Statamic; Vite (React/Vue/Svelte), Next.js, Express API; Laravel + Vite. Magento last, with a requirements check (Adobe auth keys, OpenSearch from phase 16, memory).

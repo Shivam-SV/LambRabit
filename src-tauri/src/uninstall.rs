@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use crate::{config::Settings, layout::Layout, services, shims, sites, ssl, tunnels};
 
-/// Kept: the user's projects and databases.
-const KEPT: [&str; 2] = ["www", "data"];
+/// Kept: the user's projects, databases and own project templates.
+const KEPT: [&str; 3] = ["www", "data", "templates"];
 /// Folders lampRabit creates under the environment root. Only these are deleted, so a root
 /// pointed at a folder that holds other things (a home folder) loses nothing else.
 const OWNED: [&str; 6] = ["bin", "etc", "logs", "tmp", "ssl", "shims"];

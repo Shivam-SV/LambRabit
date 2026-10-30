@@ -16,7 +16,7 @@ Laragon and lampRabit work the same way: every folder in `www` becomes `folder.t
 | Database tools | HeidiSQL, phpMyAdmin (add-on) | phpMyAdmin and Adminer, one click |
 | Email | Mailpit / Mail Catcher | Mailpit, with PHP `mail()` routed automatically |
 | Run as administrator | Usually | No; asks only for the hosts file and certificate |
-| Quick app (Laravel, WordPress) | Menu → Quick app | Sites → New project, with Laravel, Symfony, WordPress, blank and static presets |
+| Quick app (Laravel, WordPress) | Menu → Quick app | Sites → New project, with Laravel, Symfony, WordPress, CakePHP, CodeIgniter, Drupal, Statamic, blank and static templates, plus your own |
 | Terminal (Cmder) | Built in | Open terminal (title bar, tray, site cards) with php, composer and mariadb on PATH |
 | Node.js, ngrok | Built in | Ngrok and Cloudflare tunnels on the Sites page; Node.js versions through NVM on the Services page |
 

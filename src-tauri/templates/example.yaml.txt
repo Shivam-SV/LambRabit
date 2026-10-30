@@ -1,0 +1,72 @@
+# An example lampRabit project template. Rename it to something.yaml (or copy it) and it
+# appears in New project. The full reference is in lampRabit's docs (docs/templates.md).
+#
+# Templates you add here run their steps on your computer: lampRabit asks before running
+# any step that looks risky (deleting files, downloading scripts, running as admin...).
+
+schema: 1                 # template format version; must be 1
+id: laravel-breeze        # unique; a template with a built-in's id replaces it
+name: Laravel + Breeze
+description: Laravel with Breeze authentication and a built frontend.
+version: 1                # bump when you change it; projects record which one they came from
+icon: flame               # code, file, flame, boxes, newspaper, cake, droplet, zap, layers, box
+color: red                # red, orange, amber, sky, blue, indigo, pink, rose, zinc, teal
+duration: Composer and npm · a few minutes
+
+requires:
+  php: "8.2"              # lowest PHP version, "any", or leave out if the project has no PHP
+  extensions: [mbstring, openssl, pdo_mysql]
+
+database: optional        # none, optional (a switch in the wizard) or required
+
+variables:                # extra fields in the wizard, used as {{vars.<id>}}
+  - id: stack
+    label: Breeze stack
+    type: choice          # text, choice or bool
+    options: [blade, react, vue]
+    default: blade
+
+steps:
+  - create_database: {}   # the database named in the wizard; skipped without one
+
+  - name: Creating the Laravel project
+    cwd: www              # composer create-project runs in www/; other steps run in the project
+    composer: [create-project, laravel/laravel, "{{project}}", --prefer-dist, --no-interaction]
+
+  - name: Connecting the database
+    if: database          # database, !database, vars.stack == react, vars.stack != blade
+    env:                  # sets keys in .env (or file: .env.local), adding missing ones
+      values:
+        DB_CONNECTION: "{{db.engine}}"
+        DB_HOST: "{{db.host}}"
+        DB_PORT: "{{db.port}}"
+        DB_DATABASE: "{{database}}"
+        DB_USERNAME: "{{db.user}}"
+        DB_PASSWORD: "{{db.password}}"
+
+  - name: Installing Breeze
+    composer: [require, laravel/breeze, --dev]
+
+  - name: Setting up Breeze ({{vars.stack}})
+    php: [artisan, "breeze:install", "{{vars.stack}}", --no-interaction]
+
+  - name: Running database migrations
+    if: database
+    php: [artisan, migrate, --force]
+
+  - id: frontend          # optional steps get a checkbox in the wizard
+    optional: true
+    default: true
+    label: Install and build the frontend with npm
+    needs: [node]         # checked before anything is created
+    run: npm install && npm run build
+
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New project from my template
+
+done: "Ready at {{url}}. Register an account to try Breeze."

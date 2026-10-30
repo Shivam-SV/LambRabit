@@ -115,18 +115,22 @@ When Apache starts, lampRabit adds your sites to the system hosts file, with one
 Add a folder while the server is running and lampRabit offers to apply it: domains, certificates and the hosts file update together.
 
 ### Create a project (Available)
-A guided "New project" dialog: name the project (with a live preview of its URL), pick a preset, choose the PHP version, web server and HTTPS, and optionally create a database. Progress and tool output stream live; if anything fails, nothing is left behind and you can try again.
+A guided "New project" dialog: name the project (with a live preview of its URL), pick a template, choose the PHP version, web server and HTTPS, and optionally create a database. Progress and tool output stream live. Requirements (PHP version, extensions, Node, Git) are checked before anything is created, and if a step fails, nothing is left behind and you can try again.
 
-### Project presets (Available)
+### Project templates (Available)
 - **Blank PHP** and **Static site**: ready instantly.
-- **Laravel**: the latest Laravel via Composer, with `.env` already pointing at the new MariaDB database and Mailpit, and migrations run.
+- **Laravel**: the latest Laravel via Composer, with `.env` pointing at the new database and Mailpit, and migrations run. Optionally builds the frontend with npm.
 - **Symfony**: the Symfony skeleton with `DATABASE_URL` and `MAILER_DSN` set.
 - **WordPress**: the latest release (checksum-verified) with `wp-config.php` written, including fresh security keys; finish the install in the browser.
+- **CakePHP**, **CodeIgniter 4**, **Drupal** (database settings filled in for its installer) and **Statamic**.
+- Every template can also initialise a Git repository.
+
+Templates are YAML files, and you can add your own in the `templates` folder (**New project → Your templates**). lampRabit asks before running a risky step from a template you added (deleting files, piping a download into a shell, running as administrator…). See [the template reference](../templates.md).
 
 Composer is downloaded and verified the first time it's needed.
 
 ### Coming soon
-- **More presets**: dedicated database users and Redis for presets that use them.
+- **Extra domains and processes** in templates, once projects can have them (phase 12).
 ### Share a site on the internet (Available)
 Put any site on a public URL from its card, for testing webhooks, showing a client or trying a phone. Requests reach the site with its own domain, so virtual hosts keep working. Share any other local port too (for example a Node dev server). Choose Cloudflare quick tunnels (no account, random trycloudflare.com address) or Ngrok (free account; your authtoken is kept in the system keychain, never in a file). Apps that store their own URL (WordPress, Laravel's `APP_URL`) may still redirect to the `.test` domain.
 
