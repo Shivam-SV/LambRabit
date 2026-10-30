@@ -16,6 +16,7 @@ mod shims;
 mod sites;
 mod ssl;
 mod tunnels;
+mod uninstall;
 
 use std::{collections::HashSet, path::PathBuf};
 
@@ -377,6 +378,32 @@ async fn start_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Str
         }
     }
     Ok(errors)
+}
+
+/// What removing lampRabit deletes and keeps, for Settings to show before asking.
+#[tauri::command]
+async fn uninstall_plan(app: AppHandle, state: State<'_, AppState>) -> Result<uninstall::Plan> {
+    let (_, layout) = state.snapshot().await;
+    let config_dir = app.path().app_config_dir().map_err(|e| Error::msg(e.to_string()))?;
+    Ok(uninstall::plan(&layout, &config_dir))
+}
+
+/// Removes lampRabit's files and outside changes, keeping www/ and data/. The app is left
+/// without settings or runtimes, so Settings quits it afterwards.
+#[tauri::command]
+async fn uninstall(app: AppHandle, state: State<'_, AppState>) -> Result<uninstall::Report> {
+    let _op = state.ops.lock().await;
+    state.tunnels.stop_all().await;
+    // A clean stop, so the databases kept in data/ shut down properly.
+    for kind in ServiceKind::all() {
+        state.supervisor.stop(&app, kind).await;
+    }
+    for kind in ServiceKind::all() {
+        state.supervisor.wait_stopped(kind).await;
+    }
+    let (_, layout) = state.snapshot().await;
+    let config_dir = app.path().app_config_dir().map_err(|e| Error::msg(e.to_string()))?;
+    Ok(uninstall::run(&layout, &config_dir).await)
 }
 
 #[tauri::command]
@@ -1346,6 +1373,12 @@ async fn set_active_version(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The Windows uninstaller's cleanup: no window, and before the single-instance plugin,
+    // which would otherwise hand the call to a running copy.
+    if std::env::args().any(|a| a == "--uninstall-cleanup") {
+        uninstall::cli();
+        return;
+    }
     tauri::Builder::default()
         // Must be registered first: a second launch hands over to the running copy and exits
         // before anything else (tray, services, log files) is set up.
@@ -1484,6 +1517,8 @@ pub fn run() {
             stop_service,
             start_all,
             stop_all,
+            uninstall_plan,
+            uninstall,
             apply_services,
             service_usage,
             check_port,

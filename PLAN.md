@@ -83,11 +83,11 @@ macOS was in preview because only Redis, Mailpit, ngrok, cloudflared and Compose
 ### 10.3 Stability on all OSes
 - A cross-platform smoke test: install runtime → start → health probe → stop, for every service, on Windows, Linux and macOS in CI.
 - A compatibility matrix (runtime × OS × arch, with the reason when one isn't available) in the docs, generated from the catalogs where possible.
-### 10.4 Uninstall
-- Removes `bin/`, `etc/`, `logs/`, `tmp/`, `ssl/`, the settings and app data, the managed hosts-file block, the local CA's trust entry, and the shims' PATH entries. Keeps `www/` and `data/`.
-- Before removing, stop running services and `reap_orphans`, so no file is in use.
-- Windows: NSIS uninstall hook (`installer.nsh`). Linux/macOS have no uninstaller hook (AppImage, dmg), so add a "Remove lampRabit's files" action in Settings that does the same and says what it keeps; the NSIS hook can call the same code (`lamprabit --uninstall-cleanup`).
-- Never delete outside the environment folder; list what will be removed before doing it.
+### 10.4 Uninstall ✅ (2026-10-30)
+- `uninstall.rs` removes the folders lampRabit creates under the root (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`, nothing else), the root itself only if empty, the settings and (Windows uninstaller) WebView data, the hosts block, the trusted CA (system store and, on Linux, the browsers' NSS databases), the PATH entry, the ngrok token and the Linux sysctl file. Keeps `www/` and `data/`.
+- Windows: NSIS `NSIS_HOOK_PREUNINSTALL` (src-tauri/windows/hooks.nsh) asks to close the app and runs `lampRabit.exe --uninstall-cleanup`; skipped for updates (`/UPDATE`). The uninstaller itself removes the autostart entry.
+- Every OS: Settings → Troubleshooting → "Remove lampRabit from this computer" stops services cleanly, shows what is deleted and kept, reports what couldn't be undone, then quits. Linux does the system files in one pkexec prompt.
+- ⏳ The MSI installer doesn't run the cleanup yet (needs a WiX custom action); the .deb's removal can't reach per-user files, so Linux users use the Settings action.
 
 ## Phase 11: Caddy and FrankenPHP
 

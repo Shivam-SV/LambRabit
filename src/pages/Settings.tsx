@@ -26,6 +26,7 @@ import {
   Stethoscope,
   Sun,
   SquareTerminal,
+  Trash2,
   Wind,
 } from "lucide-react";
 import clsx from "clsx";
@@ -37,6 +38,7 @@ import { installAppUpdate, useAppUpdate } from "../lib/updates";
 import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { runtimeTiles } from "../components/runtimes";
+import UninstallDialog from "../components/UninstallDialog";
 import { Button, Card, PageHeader, Segmented, Switch, inputClass } from "../components/ui";
 
 type Os = EnvPaths["os"];
@@ -92,6 +94,7 @@ export default function Settings() {
   const os = useQuery({ queryKey: ["paths"], queryFn: api.envPaths }).data?.os;
   const ports = useQuery({ queryKey: ["port-status"], queryFn: api.portStatus, refetchInterval: 5000 });
   const openDiagnostics = useAppStore((s) => s.setDiagnosticsOpen);
+  const [uninstalling, setUninstalling] = useState(false);
   const [draft, setDraft] = useState<SettingsT | null>(null);
   const [versions, setVersions] = useState<Versions | null>(null);
   const [current, setCurrent] = useState<string>("general");
@@ -510,7 +513,16 @@ export default function Settings() {
                 <Stethoscope size={15} /> Run diagnostics
               </Button>
             </Row>
+            <Row
+              label="Remove lampRabit from this computer"
+              hint="Deletes runtimes, configs, logs, certificates, hosts entries and settings. Your projects (www) and databases (data) are kept."
+            >
+              <Button variant="danger" onClick={() => setUninstalling(true)}>
+                <Trash2 size={15} /> Remove…
+              </Button>
+            </Row>
           </Section>
+          {uninstalling && <UninstallDialog onClose={() => setUninstalling(false)} />}
         </div>
       </div>
     </>
