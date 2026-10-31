@@ -26,12 +26,13 @@ pub fn write_apache(settings: &Settings, layout: &Layout, plan: &[PoolPlan]) -> 
     let runtime_dir = layout.tmp().join("apache");
     std::fs::create_dir_all(&runtime_dir)?;
 
+    // mod_version: .htaccess files use <IfVersion> (Magento's pub/.htaccess does).
     let mut modules = vec![
         "access_compat", "actions", "alias", "allowmethods", "auth_basic", "authn_core", "authn_file",
         "authz_core", "authz_groupfile", "authz_host", "authz_user", "autoindex", "deflate", "dir", "env",
         "expires", "filter", "headers", "include", "lbmethod_byrequests", "log_config", "mime", "negotiation",
         "proxy", "proxy_balancer", "proxy_fcgi", "proxy_http", "rewrite", "setenvif", "slotmem_shm",
-        "socache_shmcb", "vhost_alias",
+        "socache_shmcb", "version", "vhost_alias",
     ];
     if !cfg!(windows) {
         modules.extend(["mpm_event", "unixd"]);
