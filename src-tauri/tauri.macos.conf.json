@@ -2,7 +2,7 @@
   "app": {
     "windows": [
       {
-        "title": "lampRabit",
+        "title": "LampRabit",
         "width": 1280,
         "height": 860,
         "minWidth": 900,

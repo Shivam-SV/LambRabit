@@ -2,20 +2,20 @@
 
 ## General
 
-**Is lampRabit free?**
+**Is LampRabit free?**
 Yes. It's free and open source: https://github.com/Shivam-SV/LampRabit
 
 **What does the name mean?**
 LAMP (Linux, Apache, MySQL/MariaDB, PHP), the classic web stack, plus a rabbit: it's quick.
 
 **Does it need administrator rights?**
-No. The app and all services run as your normal user. Your system asks for approval only to update the hosts file (when your site list changes) and, on Windows, to confirm trusting lampRabit's certificate.
+No. The app and all services run as your normal user. Your system asks for approval only to update the hosts file (when your site list changes) and, on Windows, to confirm trusting LampRabit's certificate.
 
 **Which platforms are supported?**
 Windows, macOS and Linux. One-click downloads cover every runtime on Windows; on macOS and Linux some runtime downloads are still coming (see the installation guide).
 
 **Can I use it next to XAMPP or Laragon?**
-Yes, but not at the same time on the same ports. Stop one before starting the other, or give lampRabit different ports in Settings → Ports.
+Yes, but not at the same time on the same ports. Stop one before starting the other, or give LampRabit different ports in Settings → Ports.
 
 **Where are my files?**
 Everything is in one folder: `C:\lampRabit` on Windows, `~/lampRabit` on macOS and Linux. Projects are in `www`, databases in `data`, logs in `logs`.
@@ -29,7 +29,7 @@ Create a folder in `www` (Open www in the title bar). It's available at `https:/
 The domain isn't in the hosts file yet. On the Sites page, click **Update hosts file** (or **Apply changes**) and approve the administrator prompt. Alternatively, set the domain suffix to `localhost` in Settings; `*.localhost` works without the hosts file.
 
 **Updating the hosts file fails.**
-lampRabit handles read-only hosts files automatically. If it still fails, the error message says why; most often security software (Windows Defender, antivirus) protects the hosts file. Allow lampRabit in that software, or add the lines shown on the Sites page to the hosts file by hand. A copy of your previous hosts file is kept in `tmp/hosts.backup`.
+LampRabit handles read-only hosts files automatically. If it still fails, the error message says why; most often security software (Windows Defender, antivirus) protects the hosts file. Allow LampRabit in that software, or add the lines shown on the Sites page to the hosts file by hand. A copy of your previous hosts file is kept in `tmp/hosts.backup`.
 
 **The browser says the connection isn't private.**
 Click **Trust certificate** on the Sites page, confirm, and restart the browser. Firefox needs `security.enterprise_roots.enabled` set to `true` in `about:config`.
@@ -38,10 +38,10 @@ Click **Trust certificate** on the Sites page, confirm, and restart the browser.
 Yes, per site (switch on its card) or for all new sites (Settings → General → HTTPS by default).
 
 **My Laravel/Symfony site shows a file list instead of the app.**
-lampRabit serves the `public/` folder automatically when it exists. Make sure the project has one, then click **Apply changes**.
+LampRabit serves the `public/` folder automatically when it exists. Make sure the project has one, then click **Apply changes**.
 
 **Pretty URLs don't work.**
-On Apache, check the project's `.htaccess` (Apache honours it). On Nginx, lampRabit routes unknown URLs to `index.php` automatically.
+On Apache, check the project's `.htaccess` (Apache honours it). On Nginx, LampRabit routes unknown URLs to `index.php` automatically.
 
 ## PHP
 
@@ -49,7 +49,7 @@ On Apache, check the project's `.htaccess` (Apache honours it). On Nginx, lampRa
 Install the version on the Services page, then pick it on the site's card (Sites → PHP).
 
 **How do I change a php.ini setting?**
-For one project, add a `.user.ini` file in its served folder (for example `public/.user.ini`) with the settings you need. lampRabit's generated `php.ini` is rewritten on every start, so don't edit it directly.
+For one project, add a `.user.ini` file in its served folder (for example `public/.user.ini`) with the settings you need. LampRabit's generated `php.ini` is rewritten on every start, so don't edit it directly.
 
 **Pages are slow when several requests run at once (Windows).**
 Raise Settings → Web server → **PHP workers per version** (default 4).
@@ -63,7 +63,7 @@ Host `127.0.0.1`, port `3306`, user `root`, no password.
 Install it on the Services page (Developer tools), then use the MariaDB card's **Open phpMyAdmin** button or the quick link on Overview. It's also at `http://localhost/phpmyadmin`.
 
 **I switched MariaDB to an older major version and it won't start.**
-lampRabit blocks this to protect your data: the files were last used by a newer MariaDB. Switch back to that version on the Services page. Moving up to a newer version is fine; lampRabit upgrades the system tables automatically.
+LampRabit blocks this to protect your data: the files were last used by a newer MariaDB. Switch back to that version on the Services page. Moving up to a newer version is fine; LampRabit upgrades the system tables automatically.
 
 ## Email
 

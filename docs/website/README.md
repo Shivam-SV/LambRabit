@@ -1,14 +1,14 @@
-# lampRabit website content pack
+# LampRabit website content pack
 
-Everything needed to build the lampRabit marketing and documentation website. The copy in these files is final-draft quality and can be used as-is or edited for tone.
+Everything needed to build the LampRabit marketing and documentation website. The copy in these files is final-draft quality and can be used as-is or edited for tone.
 
-## What lampRabit is
+## What LampRabit is
 
-lampRabit is a free, open-source desktop app that runs a complete local PHP development environment: Apache or Nginx, PHP (several versions side by side), MariaDB, and developer tools like phpMyAdmin, Adminer and Mailpit. Every folder you put in `www/` becomes a site at `https://<folder>.test`, with a trusted local certificate. It is a modern alternative to XAMPP and Laragon, built with Rust and Tauri.
+LampRabit is a free, open-source desktop app that runs a complete local PHP development environment: Apache or Nginx, PHP (several versions side by side), MariaDB, and developer tools like phpMyAdmin, Adminer and Mailpit. Every folder you put in `www/` becomes a site at `https://<folder>.test`, with a trusted local certificate. It is a modern alternative to XAMPP and Laragon, built with Rust and Tauri.
 
 **One-line pitch:** Your local PHP stack, without the setup.
 
-**Short description (about 160 characters, for meta tags):** lampRabit runs Apache or Nginx, PHP and MariaDB on your machine. Drop a folder in www, get https://yourapp.test. Free and open source.
+**Short description (about 160 characters, for meta tags):** LampRabit runs Apache or Nginx, PHP and MariaDB on your machine. Drop a folder in www, get https://yourapp.test. Free and open source.
 
 ## Files in this pack
 
@@ -22,7 +22,7 @@ lampRabit is a free, open-source desktop app that runs a complete local PHP deve
 
 ## Feature status
 
-lampRabit is under active development. Every feature in these files is marked:
+LampRabit is under active development. Every feature in these files is marked:
 
 - **Available**: in the app today.
 - **Coming soon**: designed and scheduled; it will ship before or shortly after the first public release.
@@ -48,7 +48,7 @@ Some features are limited by platform. Where that's the case, the feature text s
 
 ### Name
 
-Always written **lampRabit**: lowercase "lamp", capital "R", single "b". In the logo lockup, "Rabit" is set in the accent colour.
+Always written **LampRabit**: lowercase "lamp", capital "R", single "b". In the logo lockup, "Rabit" is set in the accent colour.
 
 ### Logo
 

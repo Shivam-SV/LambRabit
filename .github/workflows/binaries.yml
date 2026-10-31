@@ -142,8 +142,8 @@ jobs:
         run: |
           # A pre-release is never "latest", so the app updater keeps finding app releases.
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" \
-            --title "lampRabit runtimes" --prerelease --latest=false \
-            --notes "Apache, Nginx, PHP, Redis and Memcached for Linux and macOS, and Memcached for Windows (nono303's Cygwin build, https://github.com/nono303/memcached), downloaded by lampRabit's Services page. Built by .github/workflows/binaries.yml from build/linux/; checksums are in manifest.json. Sources: https://github.com/redis/redis, https://github.com/memcached/memcached, Cygwin https://cygwin.com/"
+            --title "LampRabit runtimes" --prerelease --latest=false \
+            --notes "Apache, Nginx, PHP, Redis and Memcached for Linux and macOS, and Memcached for Windows (nono303's Cygwin build, https://github.com/nono303/memcached), downloaded by LampRabit's Services page. Built by .github/workflows/binaries.yml from build/linux/; checksums are in manifest.json. Sources: https://github.com/redis/redis, https://github.com/memcached/memcached, Cygwin https://cygwin.com/"
           gh release download "$RELEASE_TAG" -p manifest.json -D /tmp 2>/dev/null || true
           python3 build/linux/manifest.py out /tmp/manifest.json > manifest.json
           gh release upload "$RELEASE_TAG" out/*.tar.gz manifest.json --clobber

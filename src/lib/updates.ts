@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { api } from "./api";
 
 interface UpdateStore {
-  /** A newer lampRabit release, once a check found one. */
+  /** A newer LampRabit release, once a check found one. */
   available: Update | null;
   checking: boolean;
   error: string | null;

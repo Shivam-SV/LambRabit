@@ -1,7 +1,7 @@
-//! Removing lampRabit from a computer: what it set up outside its folder (hosts entries,
+//! Removing LampRabit from a computer: what it set up outside its folder (hosts entries,
 //! the trusted CA, PATH, saved tokens) and its own folders. Projects (`www/`) and databases
 //! (`data/`) are kept. Used by Settings and by the Windows uninstaller
-//! (`lampRabit.exe --uninstall-cleanup`, see windows/hooks.nsh).
+//! (`LampRabit.exe --uninstall-cleanup`, see windows/hooks.nsh).
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +11,7 @@ use crate::{config::Settings, layout::Layout, services, shims, sites, ssl, tunne
 
 /// Kept: the user's projects, databases and own project templates.
 const KEPT: [&str; 3] = ["www", "data", "templates"];
-/// Folders lampRabit creates under the environment root. Only these are deleted, so a root
+/// Folders LampRabit creates under the environment root. Only these are deleted, so a root
 /// pointed at a folder that holds other things (a home folder) loses nothing else.
 const OWNED: [&str; 6] = ["bin", "etc", "logs", "tmp", "ssl", "shims"];
 
@@ -51,13 +51,13 @@ pub fn plan(layout: &Layout, config_dir: &Path) -> Plan {
     Plan { remove, keep: existing(layout.root(), &KEPT) }
 }
 
-/// Undoes everything lampRabit set up. Services must already be stopped. Each step runs
+/// Undoes everything LampRabit set up. Services must already be stopped. Each step runs
 /// even when an earlier one fails, so as much as possible is cleaned up.
 pub async fn run(layout: &Layout, config_dir: &Path) -> Report {
     // Outside changes first: the hosts update stages its file in tmp/, deleted below.
     let mut problems = remove_system_changes(layout).await;
     if let Err(e) = shims::set_on_path(layout, false) {
-        problems.push(format!("lampRabit's commands couldn't be taken off your PATH: {e}. Remove {} from it by hand.", shims::dir(layout).display()));
+        problems.push(format!("LampRabit's commands couldn't be taken off your PATH: {e}. Remove {} from it by hand.", shims::dir(layout).display()));
     }
     let _ = tunnels::set_ngrok_token(None);
     problems.extend(remove_folders(layout, config_dir));
@@ -143,7 +143,7 @@ async fn remove_system_changes(layout: &Layout) -> Vec<String> {
     problems
 }
 
-/// `lampRabit --uninstall-cleanup`, run by the Windows uninstaller once the app is closed.
+/// `LampRabit --uninstall-cleanup`, run by the Windows uninstaller once the app is closed.
 /// Without a running app, services left behind are stopped first and the WebView's data
 /// can go too.
 pub fn cli() {

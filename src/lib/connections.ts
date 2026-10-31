@@ -7,7 +7,7 @@ export interface Connection {
 }
 
 // 127.0.0.1 rather than localhost: MySQL clients (PHP's included) read "localhost" as
-// "use the Unix socket", which isn't where lampRabit's servers listen.
+// "use the Unix socket", which isn't where LampRabit's servers listen.
 const HOST = "127.0.0.1";
 
 export function connection(kind: ServiceKind, port: number): Connection {

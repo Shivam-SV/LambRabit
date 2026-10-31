@@ -1,10 +1,10 @@
-# Releasing lampRabit
+# Releasing LampRabit
 
 Releases are built by GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)) when a version tag is pushed. They land as a **draft** release with installers for every platform and the `latest.json` file the in-app updater reads.
 
 ## One-time setup
 
-The updater only installs updates signed with lampRabit's key. The public half is in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`); the private half must never be committed.
+The updater only installs updates signed with LampRabit's key. The public half is in `src-tauri/tauri.conf.json` (`plugins.updater.pubkey`); the private half must never be committed.
 
 1. The key pair was generated on the maintainer's machine at `~/.tauri/lamprabit-updater.key` (private) and `.key.pub` (public), with no password. **Back up the private key somewhere safe** (a password manager). If it's lost, existing installs can't be updated automatically any more.
 2. In GitHub → repository → Settings → Secrets and variables → Actions, add:
@@ -52,7 +52,7 @@ Without the signing key the build still succeeds but warns that updater artifact
 
 ## Own runtime builds (Apache, Nginx, PHP, Redis, Memcached)
 
-Nobody publishes portable Linux or macOS builds of Apache, Nginx or PHP, so lampRabit builds its own, for Linux and macOS (x86_64 and aarch64 each). [.github/workflows/binaries.yml](.github/workflows/binaries.yml) runs the scripts in [build/linux/](build/linux/) and publishes the archives plus `manifest.json` (with a sha256 for each) to a pre-release tagged **`binaries`**. On Linux and macOS, the Services page reads that manifest (and on Windows, for Memcached). It's a pre-release on purpose: GitHub never treats it as "latest", so the app updater keeps finding app releases.
+Nobody publishes portable Linux or macOS builds of Apache, Nginx or PHP, so LampRabit builds its own, for Linux and macOS (x86_64 and aarch64 each). [.github/workflows/binaries.yml](.github/workflows/binaries.yml) runs the scripts in [build/linux/](build/linux/) and publishes the archives plus `manifest.json` (with a sha256 for each) to a pre-release tagged **`binaries`**. On Linux and macOS, the Services page reads that manifest (and on Windows, for Memcached). It's a pre-release on purpose: GitHub never treats it as "latest", so the app updater keeps finding app releases.
 
 - **macOS** builds run natively on GitHub's macOS runners (`macos-15-intel`, `macos-latest`). Apache's APR libraries get `@rpath` install names and the edited binaries are re-signed ad hoc, which Apple Silicon requires.
 - **Redis** is built core only (no modules, no TLS). Windows uses the community redis-windows build instead (no CI involved). Redis 8 is AGPLv3 among its licence options, so the release notes link the source; 7.2 is BSD.
@@ -61,4 +61,4 @@ Nobody publishes portable Linux or macOS builds of Apache, Nginx or PHP, so lamp
 - **Licences:** every archive carries the runtime's own licence and a `licenses/` folder with those of the libraries compiled in (`licenses` in lib.sh; for PHP, `spc dump-license`). PHP's static builds contain LGPL code (libiconv, and gettext on macOS), and Redis 8 is offered under AGPLv3: the sources are the pinned upstream tarballs plus `build/linux/`, both public. macOS builds target macOS 11 (`MACOSX_DEPLOYMENT_TARGET`), like the app.
 - **When it runs:** on pushes to `main` that change `build/linux/`, every Monday (to pick up new PHP patch releases), or by hand from the Actions tab. Builds already in the manifest are skipped; tick "rebuild" to replace them.
 - **New Apache or Nginx version:** edit `versions.env` (for Apache, add its `HTTPD_SHA256_x_y_z` from downloads.apache.org) and push. Older builds stay in the manifest, so existing installs keep working.
-- **Testing builds locally:** run a script on any Linux machine (or WSL), for example `bash build/linux/build-nginx.sh 1.30.6`. Archives land in `out/`. To point the app at them, serve the folder (`python3 build/linux/manifest.py out > out/manifest.json && python3 -m http.server -d out 8000`) and start lampRabit with `LAMPRABIT_BINARIES_URL=http://localhost:8000/`.
+- **Testing builds locally:** run a script on any Linux machine (or WSL), for example `bash build/linux/build-nginx.sh 1.30.6`. Archives land in `out/`. To point the app at them, serve the folder (`python3 build/linux/manifest.py out > out/manifest.json && python3 -m http.server -d out 8000`) and start LampRabit with `LAMPRABIT_BINARIES_URL=http://localhost:8000/`.

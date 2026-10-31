@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="public/logo.svg" alt="lampRabit logo" width="112" />
+<img src="public/logo.svg" alt="LampRabit logo" width="112" />
 
-# lampRabit
+# LampRabit
 
 **A fast, friendly local PHP development environment.** Ready on Windows and Linux; macOS in preview.
 
@@ -15,13 +15,13 @@ Apache or Nginx, PHP, MariaDB and the tools around them, with one click. Every f
 
 [**Website**](https://shivam-sv.github.io/LampRabitWebsite/) · [**Download**](https://github.com/Shivam-SV/LampRabit/releases/latest) · [Features](docs/website/features.md) · [Installation](docs/website/installation.md) · [FAQ](docs/website/faq.md)
 
-<img src="docs/screenshots/overview.png" alt="lampRabit overview dashboard with Apache, Nginx, MariaDB and Mailpit running" width="820" />
+<img src="docs/screenshots/overview.png" alt="LampRabit overview dashboard with Apache, Nginx, MariaDB and Mailpit running" width="820" />
 
 </div>
 
-## Why lampRabit
+## Why LampRabit
 
-If you've used XAMPP or Laragon, you know the idea: a local web stack you don't have to assemble by hand. lampRabit keeps that simplicity and adds what modern PHP work needs: several PHP versions side by side, a PHP version per site, HTTPS that just works, Nginx next to Apache, and a clean, modern interface.
+If you've used XAMPP or Laragon, you know the idea: a local web stack you don't have to assemble by hand. LampRabit keeps that simplicity and adds what modern PHP work needs: several PHP versions side by side, a PHP version per site, HTTPS that just works, Nginx next to Apache, and a clean, modern interface.
 
 ## Features
 
@@ -62,7 +62,7 @@ Get the latest version from the [**Releases page**](https://github.com/Shivam-SV
 
 ### Platform support
 
-On **Windows and Linux**, everything above works today. Linux gets lampRabit's own builds of Apache, Nginx, PHP, Redis and Memcached, so you choose versions the same way as on Windows. On **macOS** the app runs and the same builds are being added (preview); MariaDB and MySQL aren't downloadable there yet.
+On **Windows and Linux**, everything above works today. Linux gets LampRabit's own builds of Apache, Nginx, PHP, Redis and Memcached, so you choose versions the same way as on Windows. On **macOS** the app runs and the same builds are being added (preview); MariaDB and MySQL aren't downloadable there yet.
 
 | Runtime | Windows | macOS | Linux |
 |---|---|---|---|
@@ -79,7 +79,7 @@ On **Windows and Linux**, everything above works today. Linux gets lampRabit's o
 
 ## Quick start
 
-1. Install and open lampRabit.
+1. Install and open LampRabit.
 2. Go to **Services** and install Apache (or Nginx), PHP and MariaDB. Pick any versions you like.
 3. Click **Start all**.
 4. Put a project in the `www` folder (`C:\lampRabit\www` on Windows, `~/lampRabit/www` elsewhere), or click **New project** on the Sites page.
@@ -106,7 +106,7 @@ npm run tauri dev     # run in development
 npm run tauri build   # build installers
 ```
 
-lampRabit is built with [Tauri 2](https://v2.tauri.app/) (Rust) and React + TypeScript.
+LampRabit is built with [Tauri 2](https://v2.tauri.app/) (Rust) and React + TypeScript.
 
 ## Contributing
 

@@ -25,7 +25,7 @@ function useIdleRoutine(animated: boolean) {
   return playing;
 }
 
-/** The lampRabit mark. The head colour follows the theme so it stays visible on dark surfaces. */
+/** The LampRabit mark. The head colour follows the theme so it stays visible on dark surfaces. */
 export default function Logo({ className, animated = false }: { className?: string; animated?: boolean }) {
   const playing = useIdleRoutine(animated);
   return (
@@ -33,7 +33,7 @@ export default function Logo({ className, animated = false }: { className?: stri
       viewBox="270 145 660 660"
       className={clsx(className, playing && "logo-play")}
       role="img"
-      aria-label="lampRabit"
+      aria-label="LampRabit"
     >
       <path
         fill="var(--logo-head)"

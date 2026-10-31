@@ -36,14 +36,14 @@ const EXTRAS: &[Extra] = &[
         ini: "xdebug.mode = debug,develop\nxdebug.start_with_request = trigger\nxdebug.client_port = 9003\n",
         note: Some("Debugging starts when the request has XDEBUG_TRIGGER (browser extension or ?XDEBUG_TRIGGER=1); your IDE listens on port 9003. Slows PHP down while enabled."),
     },
-    Extra { name: "redis", description: "Native Redis client (phpredis)", ini: "", note: Some("Pairs with lampRabit's Redis service. Some apps also want igbinary.") },
+    Extra { name: "redis", description: "Native Redis client (phpredis)", ini: "", note: Some("Pairs with LampRabit's Redis service. Some apps also want igbinary.") },
     Extra { name: "apcu", description: "In-memory user cache", ini: "apc.enable_cli = 1\n", note: None },
     Extra { name: "igbinary", description: "Compact binary serializer, used by Redis and Memcached clients", ini: "", note: None },
     Extra {
         name: "memcached",
         description: "Memcached client (libmemcached)",
         ini: "",
-        note: Some("Pairs with lampRabit's Memcached service. Installs libmemcached's DLL next to PHP."),
+        note: Some("Pairs with LampRabit's Memcached service. Installs libmemcached's DLL next to PHP."),
     },
     Extra { name: "mongodb", description: "MongoDB driver", ini: "", note: None },
     Extra { name: "pcov", description: "Fast code coverage for PHPUnit", ini: "pcov.enabled = 1\n", note: Some("Don't enable together with Xdebug coverage.") },
@@ -143,7 +143,7 @@ const OPCACHE_DEV: &str = "opcache.enable=1\nopcache.validate_timestamps=1\nopca
 pub fn ini_lines(settings: &Settings, layout: &Layout, php: &str) -> String {
     let mut out = String::new();
     if !cfg!(windows) {
-        // lampRabit's Linux builds have every extension compiled in; only settings apply.
+        // LampRabit's Linux builds have every extension compiled in; only settings apply.
         out.push_str(OPCACHE_DEV);
         return out;
     }
@@ -206,7 +206,7 @@ async fn download_url(client: &reqwest::Client, name: &str, php: &str) -> Option
 
 pub async fn list(client: &reqwest::Client, settings: &Settings, layout: &Layout, php: &str) -> Result<Vec<ExtInfo>> {
     if !cfg!(windows) {
-        return Err(Error::msg("The extension manager works with lampRabit's Windows PHP builds for now."));
+        return Err(Error::msg("The extension manager works with LampRabit's Windows PHP builds for now."));
     }
     if !layout.bin("php", php).exists() {
         return Err(Error::msg(format!("PHP {php} is not installed")));
@@ -247,7 +247,7 @@ pub async fn list(client: &reqwest::Client, settings: &Settings, layout: &Layout
 /// Downloads an extra into PHP's ext/ folder (and any DLLs it depends on next to php.exe).
 pub async fn install(client: &reqwest::Client, layout: &Layout, php: &str, name: &str) -> Result<String> {
     if !EXTRAS.iter().any(|x| x.name == name) {
-        return Err(Error::msg(format!("{name} isn't an extension lampRabit can install")));
+        return Err(Error::msg(format!("{name} isn't an extension LampRabit can install")));
     }
     let (url, version) = download_url(client, name, php)
         .await

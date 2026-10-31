@@ -1,7 +1,7 @@
-# An example lampRabit project template. Rename it to something.yaml (or copy it) and it
-# appears in New project. The full reference is in lampRabit's docs (docs/templates.md).
+# An example LampRabit project template. Rename it to something.yaml (or copy it) and it
+# appears in New project. The full reference is in LampRabit's docs (docs/templates.md).
 #
-# Templates you add here run their steps on your computer: lampRabit asks before running
+# Templates you add here run their steps on your computer: LampRabit asks before running
 # any step that looks risky (deleting files, downloading scripts, running as admin...).
 
 schema: 1                 # template format version; must be 1
