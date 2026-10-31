@@ -122,15 +122,29 @@ A guided "New project" dialog: name the project (with a live preview of its URL)
 - **Laravel**: the latest Laravel via Composer, with `.env` pointing at the new database and Mailpit, and migrations run. Optionally builds the frontend with npm.
 - **Symfony**: the Symfony skeleton with `DATABASE_URL` and `MAILER_DSN` set.
 - **WordPress**: the latest release (checksum-verified) with `wp-config.php` written, including fresh security keys; finish the install in the browser.
-- **CakePHP**, **CodeIgniter 4**, **Drupal** (database settings filled in for its installer) and **Statamic**.
+- **CakePHP**, **CodeIgniter 4**, **Drupal** (database settings filled in for its installer), **Statamic** and **Magento** (Mage-OS or Adobe's edition, installed with an admin account).
+- **Vite** (React, Vue, Svelte, Solid, Preact, Lit, Qwik, vanilla), **Next.js**, **Nuxt**, **Astro**, **Express** and **NestJS**, on the Node.js version and package manager you choose. Each asks the questions its own CLI does (TypeScript, linter, router, Tailwind, modules, integrations…), and only the ones that apply to your earlier answers.
 - Every template can also initialise a Git repository.
 
 Templates are YAML files, and you can add your own in the `templates` folder (**New project → Your templates**). LampRabit asks before running a risky step from a template you added (deleting files, piping a download into a shell, running as administrator…). See [the template reference](../templates.md).
 
 Composer is downloaded and verified the first time it's needed.
 
+### Node.js projects (Available)
+A project with a package.json can run its dev server from its Sites page: on the Node.js version you pick from NVM (or what `.nvmrc` asks for; NVM's own default never changes) and with npm, pnpm, Yarn or Bun. You never type a serve command: it comes from the project's template or its package.json, with an optional override. Node projects start only when you start them, never with your services.
+
+### The domain follows your dev server (Available)
+LampRabit watches which ports each project's processes listen on, whether it started them or you did in a terminal (`npm run dev`, `php artisan serve`…), and points the project's domain and its HTTPS certificate at that port within a few seconds. When the dev server stops, the domain goes back to the project's files (its build folder, for example). With several ports, the lowest wins and you can pick another. PHP projects stay on PHP unless you choose a port, so Laravel's Vite never takes over the site. Web servers reload without dropping connections where they can.
+
+### Project commands (Available)
+Each project lists the commands it offers: its template's own, its package.json and composer.json scripts, and artisan, Symfony console, Magento, Statamic, Drush, CakePHP and CodeIgniter commands. Run any of them (or any command you type) in the project folder with its PHP and Node versions, see the output right there, and find it again in Logs. Keep the ones you use often.
+
+### Project overview (Available)
+Open a project to see everything about it: framework and version, language, PHP or Node.js version and what the project requires, where its domain points (the dev server's port, or which folder is served), every port it listens on, whether its dependencies are installed (with an Install button if not), common `.env` settings (never keys or passwords), its database, and its git branch, uncommitted changes and last commit.
+
 ### Coming soon
-- **Extra domains and processes** in templates, once projects can have them (phase 12).
+- **Extra domains and several processes per project** (a queue worker, the scheduler and Vite next to the site).
+
 ### Share a site on the internet (Available)
 Put any site on a public URL from its card, for testing webhooks, showing a client or trying a phone. Requests reach the site with its own domain, so virtual hosts keep working. Share any other local port too (for example a Node dev server). Choose Cloudflare quick tunnels (no account, random trycloudflare.com address) or Ngrok (free account; your authtoken is kept in the system keychain, never in a file). Apps that store their own URL (WordPress, Laravel's `APP_URL`) may still redirect to the `.test` domain.
 
@@ -181,6 +195,8 @@ LampRabit manages Node.js versions through NVM. If you already use NVM it's dete
 One place for every log: Apache and Nginx error and access logs, PHP errors, MariaDB, Mailpit and LampRabit's own activity. Each line shows its time, service and severity. History is read from disk, so you see earlier runs too.
 
 ### Filter, search and export (Available)
+Logs from services and from each project (its dev server and the commands you ran) in one place. Pick sources, search with case-sensitive, regex or exclude options, filter by severity, stream (output, errors, access, commands) and time range.
+
 Filter by service, severity (error, warning, notice, info, access, debug) and time range; search text; pause the live view; export what you see to a file; clear all log files.
 
 ### System activity log (Available)
