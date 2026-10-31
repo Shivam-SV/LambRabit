@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsString, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, ffi::OsString, path::{Path, PathBuf}, process::Stdio, sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -453,6 +453,9 @@ pub fn reap_orphans(layout: &Layout) -> Vec<String> {
     // Threads are listed as processes on Linux; only whole processes are stopped.
     for (pid, process) in system.processes().iter().filter(|(_, p)| p.thread_kind().is_none()) {
         let Some(exe) = process.exe() else { continue };
+        // Linux marks a program whose file was replaced (a reinstalled runtime) "(deleted)".
+        let exe_text = exe.to_string_lossy();
+        let exe = Path::new(exe_text.strip_suffix(" (deleted)").unwrap_or(&exe_text));
         let name = exe.file_stem().and_then(|n| n.to_str()).unwrap_or_default();
         if exe.starts_with(&bin) && SERVERS.contains(&name) && process.kill() {
             stopped.push(format!("{name} (PID {pid})"));
