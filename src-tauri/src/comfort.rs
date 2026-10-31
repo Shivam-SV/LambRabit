@@ -12,7 +12,7 @@ use crate::{
     procgroup, shims,
 };
 
-/// Opens a terminal in `dir` with lampRabit's command shims (php, composer, mariadb…) first on PATH.
+/// Opens a terminal in `dir` with LampRabit's command shims (php, composer, mariadb…) first on PATH.
 pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result<()> {
     let shims = shims::write(settings, layout)?;
     let existing = std::env::var_os("PATH").unwrap_or_default();
@@ -23,10 +23,10 @@ pub fn open_terminal(settings: &Settings, layout: &Layout, dir: &Path) -> Result
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         // `start` gives the terminal its own console (and its own input; a cmd spawned
-        // directly would inherit lampRabit's empty stdin and exit at once). The first quoted
+        // directly would inherit LampRabit's empty stdin and exit at once). The first quoted
         // argument is the window title; unquoted, `start` would launch it as a program.
         std::process::Command::new("cmd")
-            .raw_arg(r#"/C start "lampRabit" cmd /K echo lampRabit terminal: php, composer and mariadb use your active versions."#)
+            .raw_arg(r#"/C start "LampRabit" cmd /K echo LampRabit terminal: php, composer and mariadb use your active versions."#)
             .current_dir(dir)
             .env("PATH", path)
             .creation_flags(CREATE_NO_WINDOW)
@@ -115,6 +115,7 @@ pub fn vc_runtime() -> VcRuntime {
     }
     let sys = PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into())).join("System32");
     let files = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"].iter().all(|f| sys.join(f).exists());
+    #[allow(unused_mut)]
     let mut version = None;
     #[cfg(windows)]
     {

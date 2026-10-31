@@ -66,7 +66,7 @@ export default function NodeCard() {
       {status.isLoading ? (
         <p className="p-5 text-sm text-muted">Checking for NVM…</p>
       ) : !data?.manager ? (
-        <VersionsLayout active={<NoActiveTile text="Node versions are installed through NVM, which lampRabit sets up when you ask." />}>
+        <VersionsLayout active={<NoActiveTile text="Node versions are installed through NVM, which LampRabit sets up when you ask." />}>
           <section className="space-y-3">
             <h4 className="text-xs font-bold tracking-wider text-muted uppercase">Set up NVM</h4>
             <p className="text-sm text-muted">

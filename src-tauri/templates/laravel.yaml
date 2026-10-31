@@ -49,3 +49,13 @@ steps:
     needs: [git]
     git_init:
       commit: New Laravel project
+commands:
+  discover: [artisan, composer.json, package.json]
+  list:
+    - name: Run the tests
+      run: php artisan test
+    - name: Clear every cache
+      run: php artisan optimize:clear
+    - name: Rebuild the database with seed data
+      run: php artisan migrate:fresh --seed --force
+      description: Drops every table, migrates again and runs the seeders.

@@ -23,7 +23,7 @@ steps:
       path: web/sites/default/settings.php
       content: |
 
-        // Added by lampRabit.
+        // Added by LampRabit.
         $settings['hash_salt'] = '{{random:64}}';
         $settings['config_sync_directory'] = '../config/sync';
         $settings['trusted_host_patterns'] = ['^{{domain}}$'];
@@ -49,4 +49,10 @@ steps:
     needs: [git]
     git_init:
       commit: New Drupal project
+commands:
+  discover: [drush, composer.json]
+  list:
+    - name: Add Drush (Drupal's command line)
+      run: composer require drush/drush
+      description: Then its commands appear here too.
 done: Open the site to run the Drupal installer; the database is already filled in.

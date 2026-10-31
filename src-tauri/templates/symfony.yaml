@@ -33,3 +33,8 @@ steps:
     needs: [git]
     git_init:
       commit: New Symfony project
+commands:
+  discover: [console, composer.json]
+  list:
+    - name: Clear the cache
+      run: php bin/console cache:clear

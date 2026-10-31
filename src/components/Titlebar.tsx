@@ -35,14 +35,14 @@ export default function Titlebar() {
     <header
       data-tauri-drag-region
       className={clsx(
-        "flex h-16 shrink-0 items-center gap-3 border-b border-line bg-surface/80 backdrop-blur-md select-none",
+        "flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface/80 backdrop-blur-md select-none",
         os === "macos" ? "pr-4 pl-20" : "pl-5",
       )}
     >
       <Logo animated className="pointer-events-none size-9 shrink-0" />
       <div className="pointer-events-none leading-tight">
         <div className="font-bold tracking-tight">
-          lamp<span className="text-accent-text">Rabit</span>
+          Lamp<span className="text-accent-text">Rabit</span>
         </div>
         <div className="text-xs text-muted">Local dev environment</div>
       </div>
@@ -66,7 +66,7 @@ export default function Titlebar() {
         <Button size="sm" onClick={() => api.openTerminal(null).catch(onError)} aria-label="Open terminal" title="Terminal with php, composer and mariadb (T)">
           <SquareTerminal size={15} />
         </Button>
-        {/* The Overview has its own (profile-aware) Start and Stop in its header. */}
+        {/* Home has its own (profile-aware) Start, Restart and Stop in its header. */}
         {page === "overview" ? null : anyRunning ? (
           <Button size="sm" onClick={stack.stopAll} disabled={stack.busy} title="Stop all (Shift+X)">
             <Square size={12} className="fill-current" /> Stop all
@@ -111,7 +111,7 @@ function WindowControls() {
     };
   }, [win]);
 
-  const base = "flex h-16 w-12 items-center justify-center text-muted transition-colors";
+  const base = "flex h-14 w-12 items-center justify-center text-muted transition-colors";
   return (
     <div className="ml-2 flex self-stretch">
       <button aria-label="Minimize" className={clsx(base, "hover:bg-surface-2 hover:text-fg")} onClick={() => win.minimize()}>

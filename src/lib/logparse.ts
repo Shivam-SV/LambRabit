@@ -1,10 +1,13 @@
-import type { LogService, RawLogLine } from "./api";
+import type { LogService, LogStream, RawLogLine } from "./api";
 
 export type Level = "error" | "warn" | "notice" | "info" | "access" | "debug";
 
 export interface LogEntry {
   id: number;
   service: LogService;
+  stream: LogStream;
+  /** For service "project". */
+  project?: string;
   time: Date;
   /** False when the line carried no timestamp and `time` is when it was read. */
   timed: boolean;
@@ -27,6 +30,8 @@ function validDate(d: Date | null): Date | null {
 }
 
 function levelFromText(text: string): Level {
+  // Summaries like "0 warnings and 0 errors" or "0 failed" are good news.
+  text = text.replace(/(no|0) (errors?|warnings?|failed|failures?)/gi, "");
   if (/\b(fatal|error|failed|crit)/i.test(text)) return "error";
   if (/\bwarn/i.test(text)) return "warn";
   if (/\b(notice|deprecated)/i.test(text)) return "notice";
@@ -35,11 +40,23 @@ function levelFromText(text: string): Level {
 
 /** Extracts time, level and message from the formats Apache, MariaDB and PHP write. */
 export function parseLog(raw: RawLogLine, received = new Date()): LogEntry {
-  const base = { id: raw.id, service: raw.service, timed: true };
+  const base = { id: raw.id, service: raw.service, stream: raw.stream, project: raw.project, timed: true };
   const line = raw.line;
   let m: RegExpMatchArray | null;
 
-  // lampRabit system log: [2026-10-24 18:11:14] info: Apache started
+  // A project's output: [2026-10-31 12:00:00] output|error|command: text
+  if ((m = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\] (output|error|command): (.*)$/))) {
+    const message = m[4];
+    return {
+      ...base,
+      stream: m[3] as LogStream,
+      time: validDate(new Date(`${m[1]}T${m[2]}`)) ?? received,
+      level: m[3] === "command" ? "notice" : levelFromText(message),
+      message,
+    };
+  }
+
+  // LampRabit system log: [2026-10-24 18:11:14] info: Apache started
   if ((m = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\] (info|warn|error): (.*)$/))) {
     return {
       ...base,

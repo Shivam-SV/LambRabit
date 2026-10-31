@@ -26,13 +26,13 @@ pub struct Settings {
     pub manage_hosts: bool,
     /// Point PHP's mail() at Mailpit while Mailpit is installed.
     pub route_mail: bool,
-    /// Look for a new lampRabit release when the app starts.
+    /// Look for a new LampRabit release when the app starts.
     pub check_updates: bool,
-    /// Closing the window keeps lampRabit (and its services) running in the tray.
+    /// Closing the window keeps LampRabit (and its services) running in the tray.
     pub close_to_tray: bool,
     /// Put the shims folder (php, composer, mariadb…) on the user's PATH.
     pub add_to_path: bool,
-    /// Start every installed service when lampRabit opens.
+    /// Start every installed service when LampRabit opens.
     pub start_services_on_launch: bool,
     /// Command used for "Open in editor" (e.g. "code", "cursor", "phpstorm").
     pub editor: String,
@@ -46,7 +46,7 @@ pub struct Settings {
     pub default_database: Database,
 }
 
-/// The two MySQL-compatible servers lampRabit runs.
+/// The two MySQL-compatible servers LampRabit runs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Database {
@@ -102,6 +102,75 @@ pub struct SiteSettings {
     pub server: Option<Server>,
     /// The template it was created from, as "id@version".
     pub template: Option<String>,
+    /// How the project runs as a Node app; None until it's set up on the Sites page.
+    pub app: Option<NodeApp>,
+    /// Commands the user added to the project's Commands panel.
+    pub commands: Vec<crate::commands::UserCommand>,
+    /// The port its domain goes to when the project listens on several (or, for PHP
+    /// projects, at all); used while that port is listening.
+    pub route_port: Option<u16>,
+}
+
+/// A Node project's process (apps.rs) and how its domain reaches it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NodeApp {
+    pub mode: AppMode,
+    /// Command mode: what runs, e.g. `npm run dev -- --port {port}`; `{port}` is filled in.
+    pub command: String,
+    /// File mode: the script `node` runs (relative to the project).
+    pub file: String,
+    /// File mode: restart when files change (`node --watch`).
+    pub watch: bool,
+    /// Where the app listens; also passed as $PORT. 0 until LampRabit picks a free one
+    /// when the app first starts.
+    pub port: u16,
+    /// An NVM-installed version; None: the project's .nvmrc, else NVM's default.
+    pub node: Option<String>,
+    /// None: worked out from the lock file.
+    pub package_manager: Option<PackageManager>,
+    /// https://<project>.test forwards to the app instead of serving the folder.
+    pub serve: bool,
+}
+
+/// How a project's domain is served. Dynamic: a process the project runs (a dev server)
+/// behind the web server, on a port LampRabit picks. Static: the web server serves the
+/// folder's files itself (with PHP for .php files).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServeMode {
+    #[default]
+    Dynamic,
+    Static,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppMode {
+    #[default]
+    Command,
+    File,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PackageManager {
+    #[default]
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
+impl PackageManager {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Yarn => "yarn",
+            Self::Bun => "bun",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

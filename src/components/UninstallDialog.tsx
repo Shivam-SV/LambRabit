@@ -9,12 +9,12 @@ import { Button } from "./ui";
 /** What the app itself leaves behind, per platform, once its files are gone. */
 const appItself: Record<string, string> = {
   windows: "Then uninstall the app from Windows Settings → Apps. Its uninstaller does this same cleanup, so running it after this is fine.",
-  macos: "Then quit and move lampRabit from Applications to the Trash.",
-  linux: "Then delete the lampRabit AppImage, or run sudo apt remove lamprabit if you installed the .deb.",
+  macos: "Then quit and move LampRabit from Applications to the Trash.",
+  linux: "Then delete the LampRabit AppImage, or run sudo apt remove lamprabit if you installed the .deb.",
 };
 
 /**
- * Removes lampRabit from this computer: runtimes, configs, logs, certificates, hosts
+ * Removes LampRabit from this computer: runtimes, configs, logs, certificates, hosts
  * entries, PATH entry and settings. Projects (www) and databases (data) are kept.
  * Mount only while open.
  */
@@ -36,13 +36,13 @@ export default function UninstallDialog({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onClose={close}
-      title={done ? "lampRabit was removed" : "Remove lampRabit from this computer"}
+      title={done ? "LampRabit was removed" : "Remove LampRabit from this computer"}
       icon={done ? <CheckCircle2 size={20} /> : <Trash2 size={20} />}
       width="max-w-xl"
       footer={
         done ? (
           <Button variant="primary" onClick={() => exit(0)} data-autofocus>
-            Quit lampRabit
+            Quit LampRabit
           </Button>
         ) : (
           <>
@@ -69,7 +69,7 @@ export default function UninstallDialog({ onClose }: { onClose: () => void }) {
               </ul>
             </div>
           ) : (
-            <p className="text-muted">Everything else lampRabit set up has been removed.</p>
+            <p className="text-muted">Everything else LampRabit set up has been removed.</p>
           )}
           {os && <p className="text-muted">{appItself[os]}</p>}
         </div>
@@ -88,7 +88,7 @@ export default function UninstallDialog({ onClose }: { onClose: () => void }) {
                 <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-muted">
                   <li>The .test entries in the hosts file</li>
                   <li>The trusted "lampRabit Local CA" certificate</li>
-                  <li>lampRabit's commands on your PATH, the saved ngrok token and starting with your computer</li>
+                  <li>LampRabit's commands on your PATH, the saved ngrok token and starting with your computer</li>
                   {os === "linux" && <li>The setting that lets the web server use ports 80 and 443</li>}
                 </ul>
                 <p className="mt-1.5 text-xs text-muted">

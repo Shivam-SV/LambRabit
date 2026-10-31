@@ -1,11 +1,11 @@
-# Contributing to lampRabit
+# Contributing to LampRabit
 
 Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 
 ## Reporting bugs and ideas
 
 - Search [existing issues](https://github.com/Shivam-SV/LampRabit/issues) first.
-- For bugs, use the bug report template and attach the **diagnostics report**: in lampRabit, open Settings → Troubleshooting → Run diagnostics → Copy. It hides your user name and home folder.
+- For bugs, use the bug report template and attach the **diagnostics report**: in LampRabit, open Settings → Troubleshooting → Run diagnostics → Copy. It hides your user name and home folder.
 - Security problems: please don't open a public issue; see [SECURITY.md](SECURITY.md).
 
 ## Development setup

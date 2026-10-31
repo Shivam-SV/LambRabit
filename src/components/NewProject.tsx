@@ -26,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
-import { api, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
+import { api, type PackageManager, type ProjectProgress, type ProjectTemplate, type Server } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { Button, Switch, inputClass } from "./ui";
 
@@ -104,6 +104,7 @@ export default function NewProject() {
   const sites = useQuery({ queryKey: ["sites"], queryFn: api.listSites, enabled: open });
   // Read every time it opens, so templates you just added show up.
   const catalog = useQuery({ queryKey: ["templates"], queryFn: api.listTemplates, enabled: open, staleTime: 0 });
+  const nodeStatus = useQuery({ queryKey: ["node"], queryFn: api.nodeStatus, enabled: open });
 
   const [name, setName] = useState("");
   const [templateId, setTemplateId] = useState("blank");
@@ -116,6 +117,8 @@ export default function NewProject() {
   const [variables, setVariables] = useState<Record<string, string>>({});
   const [optional, setOptional] = useState<Record<string, boolean>>({});
   const [approved, setApproved] = useState(false);
+  const [nodeVersion, setNodeVersion] = useState<string | null>(null);
+  const [packageManager, setPackageManager] = useState<PackageManager>("npm");
   const [phase, setPhase] = useState<Phase>({ kind: "form" });
   const [steps, setSteps] = useState<string[]>([]);
   const [output, setOutput] = useState<string[]>([]);
@@ -129,6 +132,8 @@ export default function NewProject() {
   const taken = sites.data?.sites.some((s) => s.name.toLowerCase() === name.toLowerCase());
   const nameError = name && !validName(name) ? "Letters, numbers, dashes and underscores; start with a letter or number." : taken ? "A folder with this name already exists in www." : null;
   const needsPhp = !!template?.usesPhp && phpVersions.length === 0;
+  const nodeVersions = nodeStatus.data?.installed ?? [];
+  const needsNode = !!template?.usesNode && !nodeStatus.isLoading && nodeVersions.length === 0;
   const phpInUse = php ?? settings.data?.versions.php ?? null;
   const phpTooOld = !!template?.minPhp && !!phpInUse && !atLeast(phpInUse, template.minPhp);
   const dbUse = template?.database ?? "none";
@@ -143,6 +148,17 @@ export default function NewProject() {
   const shownVariables = (template?.variables ?? []).filter((v) => holds(v.when, conditionValues));
   const shownOptional = (template?.optionalSteps ?? []).filter((o) => holds(o.when, conditionValues));
   const missingRequired = shownVariables.some((v) => v.required && !(variables[v.id] ?? "").trim());
+  // Options can follow earlier answers; a choice whose pick disappeared moves to the first one left.
+  const shownOptions = (v: (typeof shownVariables)[number]) => v.options.filter((o) => holds(o.when, conditionValues));
+  useEffect(() => {
+    for (const v of shownVariables) {
+      if (v.type !== "choice") continue;
+      const options = shownOptions(v);
+      if (options.length > 0 && !options.some((o) => o.value === variables[v.id])) {
+        setVariables((cur) => ({ ...cur, [v.id]: options[0].value }));
+      }
+    }
+  });
   // Risky steps count only when they'll run (optional ones can be unticked).
   const risks = (template?.risks ?? []).filter((r) => {
     const opt = template?.optionalSteps.find((o) => o.id === r.step);
@@ -167,7 +183,7 @@ export default function NewProject() {
   // A different template brings its own defaults.
   useEffect(() => {
     if (!template) return;
-    setVariables(Object.fromEntries(template.variables.map((v) => [v.id, v.default ?? (v.type === "choice" ? v.options[0] : v.type === "bool" ? "false" : "")])));
+    setVariables(Object.fromEntries(template.variables.map((v) => [v.id, v.default ?? (v.type === "choice" ? (v.options[0]?.value ?? "") : v.type === "bool" ? "false" : "")])));
     setOptional(Object.fromEntries(template.optionalSteps.map((o) => [o.id, o.default])));
     setApproved(false);
     setWithDb(template.database === "required" || (template.database === "optional" && hasDatabase));
@@ -199,12 +215,13 @@ export default function NewProject() {
       validName(name) &&
       !taken &&
       !needsPhp &&
+      !needsNode &&
       !phpTooOld &&
       !dbMissing &&
       !missingRequired &&
       (!usesDb || /^[A-Za-z0-9_]{1,64}$/.test(db)) &&
       (risks.length === 0 || approved),
-    [template, name, taken, needsPhp, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
+    [template, name, taken, needsPhp, needsNode, phpTooOld, dbMissing, missingRequired, usesDb, db, risks.length, approved],
   );
 
   if (!open) return null;
@@ -226,6 +243,8 @@ export default function NewProject() {
         variables,
         optional,
         approveRisky: approved,
+        node: template.usesNode ? nodeVersion : null,
+        packageManager: template.usesNode ? packageManager : null,
       });
       setPhase({ kind: "done", url: created.url, note: created.note });
     } catch (e) {
@@ -338,6 +357,36 @@ export default function NewProject() {
                   )}
                 </label>
               )}
+              {template?.usesNode && (
+                <>
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-semibold">Node.js version</span>
+                    <select className={inputClass} value={nodeVersion ?? ""} onChange={(e) => setNodeVersion(e.target.value || null)}>
+                      <option value="">NVM's default ({nodeStatus.data?.current ?? "none"})</option>
+                      {nodeVersions.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                    {needsNode ? (
+                      <span className="mt-1.5 block text-xs text-danger-text">Install Node.js on the Services page first (Node.js, through NVM).</span>
+                    ) : (
+                      <span className="mt-1.5 block text-xs text-muted">The project runs on this version; NVM's own default doesn't change.</span>
+                    )}
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-semibold">Package manager</span>
+                    <select className={inputClass} value={packageManager} onChange={(e) => setPackageManager(e.target.value as PackageManager)}>
+                      <option value="npm">npm</option>
+                      <option value="pnpm">pnpm</option>
+                      <option value="yarn">Yarn</option>
+                      <option value="bun">Bun</option>
+                    </select>
+                    <span className="mt-1.5 block text-xs text-muted">pnpm and Yarn run through npx when they aren't installed; Bun has to be.</span>
+                  </label>
+                </>
+              )}
               {settings.data?.webServer === "both" && (
                 <label className="block">
                   <span className="mb-1.5 block text-sm font-semibold">Web server</span>
@@ -348,8 +397,11 @@ export default function NewProject() {
                   </select>
                 </label>
               )}
-              {shownVariables.map((v) => (
-                <label key={v.id} className={clsx("block", v.type === "bool" && "sm:col-span-2")}>
+              {shownVariables.map((v) => {
+                // A label would forward clicks on its text to the first chip of a multi field.
+                const Field = v.type === "multi" ? "div" : "label";
+                return (
+                <Field key={v.id} className={clsx("block", (v.type === "bool" || v.type === "multi") && "sm:col-span-2")}>
                   {v.type === "bool" ? (
                     <span className="flex items-center justify-between gap-4">
                       <span>
@@ -366,20 +418,45 @@ export default function NewProject() {
                       </span>
                       {v.type === "choice" ? (
                         <select className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))}>
-                          {v.options.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
+                          {shownOptions(v).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
                             </option>
                           ))}
                         </select>
+                      ) : v.type === "multi" ? (
+                        <span className="flex flex-wrap gap-1.5" role="group" aria-label={v.label}>
+                          {shownOptions(v).map((o) => {
+                            const picked = (variables[v.id] ?? "").split(",").filter(Boolean);
+                            const on = picked.includes(o.value);
+                            return (
+                              <button
+                                key={o.value}
+                                type="button"
+                                aria-pressed={on}
+                                onClick={() =>
+                                  setVariables((cur) => ({ ...cur, [v.id]: (on ? picked.filter((x) => x !== o.value) : [...picked, o.value]).join(",") }))
+                                }
+                                className={clsx(
+                                  "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
+                                  on ? "border-accent bg-accent-soft text-accent-text" : "border-line text-muted hover:border-accent/40 hover:text-fg",
+                                )}
+                              >
+                                {on && <Check size={12} />}
+                                {o.label}
+                              </button>
+                            );
+                          })}
+                        </span>
                       ) : (
                         <input className={inputClass} value={variables[v.id] ?? ""} onChange={(e) => setVariables((cur) => ({ ...cur, [v.id]: e.target.value }))} />
                       )}
                       {v.help && <span className="mt-1.5 block text-xs text-muted">{v.help}</span>}
                     </>
                   )}
-                </label>
-              ))}
+                </Field>
+                );
+              })}
             </div>
 
             <div className="divide-y divide-line rounded-xl bg-surface-2">
@@ -436,7 +513,7 @@ export default function NewProject() {
                 <p className="flex items-center gap-2 font-semibold text-danger-text">
                   <AlertTriangle size={16} /> This template runs steps that need your OK
                 </p>
-                <p className="mt-1 text-danger-text/90">It didn't come with lampRabit, so check what these steps do before running them.</p>
+                <p className="mt-1 text-danger-text/90">It didn't come with LampRabit, so check what these steps do before running them.</p>
                 <ul className="mt-2 space-y-2">
                   {risks.map((r) => (
                     <li key={r.step} className="text-danger-text">

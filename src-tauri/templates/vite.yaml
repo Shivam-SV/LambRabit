@@ -1,0 +1,60 @@
+schema: 1
+id: vite
+name: Vite
+description: React, Vue, Svelte, Solid and more on Vite's dev server, with hot reload.
+icon: zap
+color: indigo
+duration: npm · under a minute
+requires:
+  node: true
+# create-vite's own questions (create-vite --help).
+variables:
+  - id: framework
+    label: Framework
+    type: choice
+    default: react
+    options:
+      - { value: vanilla, label: Vanilla }
+      - { value: vue, label: Vue }
+      - { value: react, label: React }
+      - { value: react-compiler, label: React with React Compiler }
+      - { value: preact, label: Preact }
+      - { value: lit, label: Lit }
+      - { value: svelte, label: Svelte }
+      - { value: solid, label: Solid }
+      - { value: qwik, label: Qwik }
+  - id: typescript
+    label: TypeScript
+    type: bool
+    default: "true"
+    on: "-ts"
+    off: ""
+  - id: linter
+    label: Linter
+    type: choice
+    if: vars.framework == react
+    default: --no-eslint
+    options:
+      - { value: --no-eslint, label: Oxlint (create-vite's default) }
+      - { value: --eslint, label: ESLint }
+steps:
+  - name: Creating the project with create-vite
+    cwd: www
+    run: '{{pm.create}} vite@latest "{{project}}" {{pm.args}} --template {{vars.framework}}{{vars.typescript}} {{vars.linter}} --no-interactive'
+  - name: Installing dependencies
+    needs: [node]
+    run: "{{pm.install}}"
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New Vite project
+commands:
+  discover: [package.json]
+# Vite listens on "localhost", which can mean IPv6 only; the proxy reaches 127.0.0.1.
+serve:
+  mode: dynamic
+  command: "{{pm.run}} dev {{pm.args}} --host 127.0.0.1 --port {port} --strictPort"
+done: Start it from the Sites page; it's served at {{url}} with hot reload.

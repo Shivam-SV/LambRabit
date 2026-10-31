@@ -31,3 +31,8 @@ steps:
     needs: [git]
     git_init:
       commit: New CakePHP project
+commands:
+  discover: [cake, composer.json]
+  list:
+    - name: Clear every cache
+      run: php bin/cake.php cache clear_all

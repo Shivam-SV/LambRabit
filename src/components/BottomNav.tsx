@@ -4,7 +4,7 @@ import { useAppStore, type PageId } from "../lib/store";
 import { useRuntimeUpdates } from "../lib/updates";
 
 const items: { id: PageId; label: string; icon: typeof House }[] = [
-  { id: "overview", label: "Overview", icon: House },
+  { id: "overview", label: "Home", icon: House },
   { id: "sites", label: "Sites", icon: Globe },
   { id: "services", label: "Services", icon: Layers },
   { id: "logs", label: "Logs", icon: FileText },

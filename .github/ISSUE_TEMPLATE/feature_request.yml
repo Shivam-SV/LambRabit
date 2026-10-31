@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea for lampRabit
+description: Suggest an idea for LampRabit
 labels: [enhancement]
 body:
   - type: textarea
@@ -12,7 +12,7 @@ body:
   - type: textarea
     id: idea
     attributes:
-      label: What would you like lampRabit to do?
+      label: What would you like LampRabit to do?
   - type: textarea
     id: alternatives
     attributes:

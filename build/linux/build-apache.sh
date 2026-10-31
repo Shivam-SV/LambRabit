@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a relocatable Apache httpd: modules are shared (lampRabit loads the ones it
+# Builds a relocatable Apache httpd: modules are shared (LampRabit loads the ones it
 # needs), APR ships in lib/ and OpenSSL, PCRE2, zlib and expat are compiled in.
 #   build-apache.sh <version>   ->  out/apache-<version>-<os>-<arch>.tar.gz (Linux or macOS)
 . "$(dirname "$0")/lib.sh"
@@ -53,7 +53,7 @@ make -j"$JOBS" >/dev/null
 make install >/dev/null
 
 log "Apache $VERSION: making it relocatable"
-# Keep what lampRabit runs; headers, manuals, build files and the sample site go.
+# Keep what LampRabit runs; headers, manuals, build files and the sample site go.
 rm -rf "$prefix"/{build,cgi-bin,error,htdocs,icons,include,man,manual,logs} "$prefix"/lib/pkgconfig
 rm -f "$prefix"/lib/*.la "$prefix"/lib/*.a "$prefix"/lib/*.exp
 find "$prefix/bin" -type f ! -name httpd ! -name ab ! -name htpasswd ! -name rotatelogs -delete

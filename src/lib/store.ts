@@ -27,8 +27,10 @@ interface AppStore {
   page: PageId;
   navigate: (page: PageId) => void;
   /** Service the Logs page opens filtered to, set by "View logs" on a service. */
-  logFilter: LogService | null;
-  showLogs: (service: LogService) => void;
+  /** A service, or "project:<name>". */
+  logFilter: string | null;
+  /** Opens Logs on one source: a service, or "project:<name>". */
+  showLogs: (source: LogService | `project:${string}`) => void;
   diagnosticsOpen: boolean;
   setDiagnosticsOpen: (open: boolean) => void;
   newProjectOpen: boolean;

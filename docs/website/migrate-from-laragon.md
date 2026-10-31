@@ -1,17 +1,17 @@
-# Moving from Laragon to lampRabit
+# Moving from Laragon to LampRabit
 
-Laragon and lampRabit work the same way: every folder in `www` becomes `folder.test`. Your URLs stay the same, so most projects move without changes. This guide takes about 15 minutes. Laragon isn't modified until the last, optional step.
+Laragon and LampRabit work the same way: every folder in `www` becomes `folder.test`. Your URLs stay the same, so most projects move without changes. This guide takes about 15 minutes. Laragon isn't modified until the last, optional step.
 
 ## What changes
 
-| | Laragon | lampRabit |
+| | Laragon | LampRabit |
 |---|---|---|
 | Projects folder | `C:\laragon\www` | `C:\lampRabit\www` |
 | Project URL | `http://myapp.test` | `https://myapp.test`: same domain, HTTPS on by default |
 | PHP versions | One active version for all sites | Several at once; each site picks its own |
 | Web server | Apache or Nginx, one at a time | Apache, Nginx, or both, chosen per site |
-| HTTPS | Laragon's certificate authority | lampRabit's certificate authority (trust once) |
-| Hosts file | Lines marked `#laragon magic!` | A marked `# lampRabit` section |
+| HTTPS | Laragon's certificate authority | LampRabit's certificate authority (trust once) |
+| Hosts file | Lines marked `#laragon magic!` | A marked `# LampRabit` section |
 | Database | MySQL 8 or MariaDB (`root`, no password) | MariaDB (`root`, no password) |
 | Database tools | HeidiSQL, phpMyAdmin (add-on) | phpMyAdmin and Adminer, one click |
 | Email | Mailpit / Mail Catcher | Mailpit, with PHP `mail()` routed automatically |
@@ -22,8 +22,8 @@ Laragon and lampRabit work the same way: every folder in `www` becomes `folder.t
 
 ## Before you start
 
-1. Install lampRabit and its stack (Apache or Nginx, PHP, MariaDB); see the installation guide.
-2. Check which PHP version your projects use in Laragon (Menu → PHP) and install the same versions in lampRabit (Services → PHP). You can install several.
+1. Install LampRabit and its stack (Apache or Nginx, PHP, MariaDB); see the installation guide.
+2. Check which PHP version your projects use in Laragon (Menu → PHP) and install the same versions in LampRabit (Services → PHP). You can install several.
 3. Check whether Laragon runs **MySQL** or **MariaDB** (Menu → MySQL). This matters for Step 3.
 
 ## Step 1: Export your databases from Laragon
@@ -45,11 +45,11 @@ Note any database users other than `root` and their grants.
 
 Click **Stop All** in Laragon and quit it (right-click the tray icon → Exit). If Laragon is set to start with Windows (Menu → Preferences → "Run Laragon when Windows starts"), turn that off so it doesn't take ports 80, 443 and 3306 again.
 
-If you skip this, lampRabit will tell you which Laragon program is in the way when you start a service, and offer to stop it.
+If you skip this, LampRabit will tell you which Laragon program is in the way when you start a service, and offer to stop it.
 
 ## Step 3: Import your databases
 
-Start MariaDB in lampRabit, then either:
+Start MariaDB in LampRabit, then either:
 
 - **phpMyAdmin:** MariaDB card → Open phpMyAdmin → Import → choose the `.sql` file → Go.
 - **Command line:** MariaDB card → ⋯ → **Open command-line client**:
@@ -59,18 +59,18 @@ Start MariaDB in lampRabit, then either:
   ```
 
 **Coming from MySQL 8:** MariaDB reads MySQL dumps, with two common snags:
-- Collation `utf8mb4_0900_ai_ci`: supported by the MariaDB versions lampRabit installs by default (11.8 LTS). If you chose an older MariaDB (10.x), replace it in the `.sql` file with `utf8mb4_unicode_ci` before importing.
+- Collation `utf8mb4_0900_ai_ci`: supported by the MariaDB versions LampRabit installs by default (11.8 LTS). If you chose an older MariaDB (10.x), replace it in the `.sql` file with `utf8mb4_unicode_ci` before importing.
 - MySQL-only features (for example some JSON functions or `caching_sha2_password` users) may need adjusting. Import the tables first; recreate users in phpMyAdmin.
 
 Recreate any extra database users you noted.
 
 ## Step 4: Move your projects
 
-Copy (or move) each project folder from `C:\laragon\www` to `C:\lampRabit\www`. Click **Open www** in lampRabit to open the folder.
+Copy (or move) each project folder from `C:\laragon\www` to `C:\lampRabit\www`. Click **Open www** in LampRabit to open the folder.
 
 The domain stays the same: `C:\lampRabit\www\shop` is `https://shop.test`, just like Laragon's `shop.test`. Projects with a `public/` folder (Laravel, Symfony) are served from it automatically, as in Laragon.
 
-Use real folders rather than shortcuts or junctions: lampRabit only picks up actual folders in `www`.
+Use real folders rather than shortcuts or junctions: LampRabit only picks up actual folders in `www`.
 
 ## Step 5: Pick PHP versions and servers
 
@@ -79,7 +79,7 @@ On the Sites page each site has:
 - **Server** (when Settings → Web server is "Both"): Apache or Nginx.
 - **HTTPS**: on by default.
 
-If you used Nginx in Laragon, either set Settings → Web server to **Nginx**, or to **Both** and pick Nginx for those sites. lampRabit's Nginx config routes unknown URLs to `index.php`, like Laragon's.
+If you used Nginx in Laragon, either set Settings → Web server to **Nginx**, or to **Both** and pick Nginx for those sites. LampRabit's Nginx config routes unknown URLs to `index.php`, like Laragon's.
 
 ## Step 6: Update project configuration
 
@@ -91,7 +91,7 @@ If you used Nginx in Laragon, either set Settings → Web server to **Nginx**, o
 
 ## Step 7: Hosts file and HTTPS
 
-1. On the Sites page, click **Apply changes** (or restart Apache) and approve the administrator prompt once. lampRabit writes its own section in the hosts file.
+1. On the Sites page, click **Apply changes** (or restart Apache) and approve the administrator prompt once. LampRabit writes its own section in the hosts file.
 2. Laragon's entries (lines ending in `#laragon magic!`) point the same domains at `127.0.0.1`, so they don't conflict. You can remove them from `C:\Windows\System32\drivers\etc\hosts` later (edit as administrator).
 3. Click **Trust certificate**. Laragon's certificate authority is different; you can remove it later with `certmgr.msc` → Trusted Root Certification Authorities (look for "Laragon").
 
@@ -101,7 +101,7 @@ Once everything works, uninstall Laragon. Keep your `.sql` export until you're s
 
 ## What's not there yet
 
-These Laragon features are coming soon to lampRabit:
+These Laragon features are coming soon to LampRabit:
 
 ## Troubleshooting
 

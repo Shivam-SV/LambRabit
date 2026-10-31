@@ -258,25 +258,25 @@ export default function Settings() {
             )}
           </Section>
 
-          <Section id="startup" title="Startup" subtitle="What happens when you sign in, open or close lampRabit.">
+          <Section id="startup" title="Startup" subtitle="What happens when you sign in, open or close LampRabit.">
             <AutostartToggle />
             <ToggleRow
-              label="Start services when lampRabit opens"
+              label="Start services when LampRabit opens"
               hint="Starts every installed service, so your sites are up right after sign-in."
               checked={draft.startServicesOnLaunch}
               onChange={(v) => set({ startServicesOnLaunch: v })}
             />
             <ToggleRow
               label="Keep running in the tray when closed"
-              hint="Closing the window leaves lampRabit and your services running; quit from the tray icon."
+              hint="Closing the window leaves LampRabit and your services running; quit from the tray icon."
               checked={draft.closeToTray}
               onChange={(v) => set({ closeToTray: v })}
             />
           </Section>
 
-          <Section id="terminal" title="Terminal" subtitle="lampRabit's commands always run your active versions with its config.">
+          <Section id="terminal" title="Terminal" subtitle="LampRabit's commands always run your active versions with its config.">
             <ToggleRow
-              label="Add lampRabit's commands to PATH"
+              label="Add LampRabit's commands to PATH"
               hint={
                 os === "windows"
                   ? "Applies to terminals opened after saving. No administrator rights needed."
@@ -434,7 +434,7 @@ export default function Settings() {
                 (os === "windows"
                   ? "Sets SMTP and smtp_port in php.ini; applies when the web server restarts."
                   : "Sets sendmail_path to Mailpit's sendmail mode; applies when PHP restarts.") +
-                " Frameworks send over SMTP instead: copy their settings from the Overview's Connect panel."
+                " Frameworks send over SMTP instead: copy their settings from Home's Connect panel."
               }
               checked={draft.routeMail}
               onChange={(v) => set({ routeMail: v })}
@@ -465,7 +465,7 @@ export default function Settings() {
 
           <SharingSection />
 
-          <Section id="appearance" title="Appearance" subtitle="How lampRabit looks and moves. Applies instantly.">
+          <Section id="appearance" title="Appearance" subtitle="How LampRabit looks and moves. Applies instantly.">
             <Row label="Theme" hint="Match your system, or always light or dark.">
               <Segmented
                 value={theme}
@@ -514,7 +514,7 @@ export default function Settings() {
               </Button>
             </Row>
             <Row
-              label="Remove lampRabit from this computer"
+              label="Remove LampRabit from this computer"
               hint="Deletes runtimes, configs, logs, certificates, hosts entries and settings. Your projects (www) and databases (data) are kept."
             >
               <Button variant="danger" onClick={() => setUninstalling(true)}>
@@ -567,7 +567,7 @@ function ToggleRow({ label, hint, checked, onChange }: { label: string; hint: st
   );
 }
 
-/** Live status of a port field: free, lampRabit's own, or taken by another program. */
+/** Live status of a port field: free, LampRabit's own, or taken by another program. */
 function PortState({ port, saved, status, hint }: { port: number; saved?: number; status?: PortStatus; hint: string }) {
   const edited = saved !== undefined && port !== saved;
   const check = useQuery({
@@ -604,7 +604,7 @@ function PortState({ port, saved, status, hint }: { port: number; saved?: number
   );
 }
 
-/** Ngrok's authtoken lives in the system keychain, never in lampRabit's files. */
+/** Ngrok's authtoken lives in the system keychain, never in LampRabit's files. */
 function SharingSection() {
   const queryClient = useQueryClient();
   const notify = useAppStore((s) => s.notify);
@@ -690,7 +690,7 @@ function UpdatesSection({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: 
   );
 
   return (
-    <Section id="updates" title="Updates" subtitle={`lampRabit ${version.data ?? ""}`}>
+    <Section id="updates" title="Updates" subtitle={`LampRabit ${version.data ?? ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
         <div className="min-w-0 flex-1 basis-64 text-sm text-muted">{status}</div>
         {available ? (
@@ -704,7 +704,7 @@ function UpdatesSection({ checkUpdates, onCheckUpdatesChange }: { checkUpdates: 
         )}
       </div>
       <ToggleRow
-        label="Check when lampRabit starts"
+        label="Check when LampRabit starts"
         hint="Looks for a new release on GitHub; nothing is downloaded until you choose to install."
         checked={checkUpdates}
         onChange={onCheckUpdatesChange}
@@ -720,7 +720,7 @@ function AutostartToggle() {
   const queryClient = useQueryClient();
   return (
     <ToggleRow
-      label="Start lampRabit when I sign in"
+      label="Start LampRabit when I sign in"
       hint="Opens in the tray, out of the way. Applies immediately."
       checked={!!enabled.data}
       onChange={async (v) => {

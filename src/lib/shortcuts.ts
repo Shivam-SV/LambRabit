@@ -6,20 +6,21 @@ export const SHORTCUTS: { group: string; items: { keys: string[]; label: string 
     group: "Anywhere",
     items: [
       { keys: ["?"], label: "Show keyboard shortcuts" },
-      { keys: ["1"], label: "Overview" },
+      { keys: ["1"], label: "Home" },
       { keys: ["2"], label: "Sites" },
       { keys: ["3"], label: "Services" },
       { keys: ["4"], label: "Logs" },
       { keys: ["5"], label: "Settings" },
       { keys: ["Shift", "S"], label: "Start all (or the active profile)" },
       { keys: ["Shift", "X"], label: "Stop all" },
+      { keys: ["Shift", "R"], label: "Restart the running services" },
       { keys: ["N"], label: "New project" },
       { keys: ["T"], label: "Open terminal" },
       { keys: ["W"], label: "Open the www folder" },
     ],
   },
   {
-    group: "Overview: services",
+    group: "Home: services",
     items: [
       { keys: ["↓", "J"], label: "Next service" },
       { keys: ["↑", "K"], label: "Previous service" },

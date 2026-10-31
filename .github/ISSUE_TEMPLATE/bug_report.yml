@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in lampRabit doesn't work as expected
+description: Something in LampRabit doesn't work as expected
 labels: [bug]
 body:
   - type: textarea
@@ -19,7 +19,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: lampRabit version
+      label: LampRabit version
       description: Shown in Settings → Updates.
       placeholder: "0.1.0"
     validations:

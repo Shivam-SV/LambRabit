@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a relocatable Nginx: OpenSSL, PCRE2 and zlib are compiled in, and lampRabit
+# Builds a relocatable Nginx: OpenSSL, PCRE2 and zlib are compiled in, and LampRabit
 # passes the prefix and config on the command line.
 #   build-nginx.sh <version>   ->  out/nginx-<version>-<os>-<arch>.tar.gz (Linux or macOS)
 . "$(dirname "$0")/lib.sh"

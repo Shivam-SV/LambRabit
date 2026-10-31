@@ -1,13 +1,17 @@
+mod apps;
 mod comfort;
+mod commands;
 mod config;
 mod configs;
 mod diagnose;
 mod error;
 mod extensions;
+mod facts;
 mod layout;
 mod logs;
 mod node;
 mod php;
+mod ports;
 mod procgroup;
 mod projects;
 mod runtimes;
@@ -46,6 +50,8 @@ struct AppState {
     /// Process table for the dashboard's CPU and memory readings; kept between calls
     /// because CPU usage is measured from one refresh to the next.
     processes: std::sync::Mutex<sysinfo::System>,
+    /// Node apps the user started from Sites (separate from services).
+    apps: apps::Apps,
 }
 
 impl AppState {
@@ -270,7 +276,7 @@ fn check_root(layout: &Layout) -> Result<()> {
     let probe = layout.tmp().join(".lamprabit-write-test");
     std::fs::write(&probe, b"ok")
         .and_then(|_| std::fs::read(&probe))
-        .map_err(|e| Error::msg(format!("lampRabit can't write to {}: {e}", root.display())))?;
+        .map_err(|e| Error::msg(format!("LampRabit can't write to {}: {e}", root.display())))?;
     let _ = std::fs::remove_file(probe);
     Ok(())
 }
@@ -381,7 +387,7 @@ async fn start_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Str
     Ok(errors)
 }
 
-/// What removing lampRabit deletes and keeps, for Settings to show before asking.
+/// What removing LampRabit deletes and keeps, for Settings to show before asking.
 #[tauri::command]
 async fn uninstall_plan(app: AppHandle, state: State<'_, AppState>) -> Result<uninstall::Plan> {
     let (_, layout) = state.snapshot().await;
@@ -389,7 +395,7 @@ async fn uninstall_plan(app: AppHandle, state: State<'_, AppState>) -> Result<un
     Ok(uninstall::plan(&layout, &config_dir))
 }
 
-/// Removes lampRabit's files and outside changes, keeping www/ and data/. The app is left
+/// Removes LampRabit's files and outside changes, keeping www/ and data/. The app is left
 /// without settings or runtimes, so Settings quits it afterwards.
 #[tauri::command]
 async fn uninstall(app: AppHandle, state: State<'_, AppState>) -> Result<uninstall::Report> {
@@ -644,7 +650,15 @@ async fn set_site_server(app: AppHandle, state: State<'_, AppState>, name: Strin
         Some(config::Server::Apache) => "Apache",
         None => "the default server",
     }));
-    restart_web_servers(&app, &state).await
+    restart_web_servers(&app, &state).await?;
+    // The site now needs its new server; start it when a web server was serving sites.
+    let (settings, layout) = state.snapshot().await;
+    let kind = if sites::site_server(&settings, &name) == config::Server::Nginx { ServiceKind::Nginx } else { ServiceKind::Apache };
+    let other = if kind == ServiceKind::Nginx { ServiceKind::Apache } else { ServiceKind::Nginx };
+    if !state.supervisor.is_running(kind).await && state.supervisor.is_running(other).await {
+        state.supervisor.start(&app, kind, &settings, &layout).await?;
+    }
+    Ok(())
 }
 
 /// Creates a project in www/ from a template and returns its URL. Progress is streamed as
@@ -690,8 +704,8 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
     }
     .await;
 
-    let note = match result {
-        Ok(note) => note,
+    let built = match result {
+        Ok(built) => built,
         Err(e) => {
             let _ = std::fs::remove_dir_all(layout.www().join(&name));
             state.update_settings(|s| { s.sites.remove(&name); }).await?;
@@ -699,12 +713,17 @@ async fn create_project(app: AppHandle, state: State<'_, AppState>, request: pro
             return Err(e);
         }
     };
+    // A Node project gets its run setup, on a port of its own.
+    if let Some(mut app_config) = built.app {
+        app_config.port = apps::free_port(&*state.settings.read().await);
+        state.update_settings(|s| s.sites.entry(name.clone()).or_default().app = Some(app_config)).await?;
+    }
     // Composer may have just been installed; this makes it the active version and adds its shim.
     state.update_settings(reconcile_versions).await?;
     ctx.step("Adding the site to the web server");
     restart_web_servers(&app, &state).await?;
     logs::system(&app, logs::Level::Info, format!("Created project {name} at {url}"));
-    Ok(CreatedProject { url, note })
+    Ok(CreatedProject { url, note: built.note })
 }
 
 #[derive(Serialize)]
@@ -732,6 +751,403 @@ async fn open_templates_folder(app: AppHandle, state: State<'_, AppState>) -> Re
         std::fs::write(dir.join("example.yaml.txt"), templates::EXAMPLE)?;
     }
     app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| Error::msg(e.to_string()))
+}
+
+/// A project folder in www/ by name; names with path separators are refused.
+fn project_dir(layout: &Layout, name: &str) -> Result<PathBuf> {
+    let dir = layout.www().join(name);
+    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') || !dir.is_dir() {
+        return Err(Error::msg(format!("There's no project called {name} in www.")));
+    }
+    Ok(dir)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    /// The saved setup, or what package.json suggests when there's none yet (port 0: picked
+    /// when it starts).
+    config: config::NodeApp,
+    configured: bool,
+    scripts: std::collections::BTreeMap<String, String>,
+    detected_package_manager: config::PackageManager,
+    /// Versions installed with NVM, newest first.
+    node_versions: Vec<String>,
+    /// What .nvmrc / .node-version asks for.
+    project_node: Option<String>,
+    framework: Option<&'static str>,
+    status: apps::AppStatus,
+}
+
+/// How a Node project runs, for its panel on the Sites page.
+#[tauri::command]
+async fn app_info(state: State<'_, AppState>, name: String) -> Result<AppInfo> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let saved = settings.sites.get(&name).and_then(|s| s.app.clone());
+    Ok(AppInfo {
+        configured: saved.is_some(),
+        config: saved.unwrap_or_else(|| apps::suggest(&dir, 0)),
+        scripts: apps::scripts(&dir),
+        detected_package_manager: apps::detect_package_manager(&dir),
+        node_versions: node::installed_versions(),
+        project_node: node::project_version(&dir),
+        framework: apps::framework(&dir),
+        status: state.apps.status(&name).await,
+    })
+}
+
+/// Saves how a Node project runs. Serving it (or its port) changing rewrites the web
+/// server's sites, which a running web server picks up with a restart.
+#[tauri::command]
+async fn app_save(app: AppHandle, state: State<'_, AppState>, name: String, config: config::NodeApp) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    // Port 0 means "pick one when it starts".
+    if let Some((other, _)) = settings.sites.iter().find(|(n, s)| config.port > 0 && **n != name && s.app.as_ref().is_some_and(|a| a.port == config.port)) {
+        return Err(Error::msg(format!("Port {} is already {other}'s. Choose another one.", config.port)));
+    }
+    let before = settings.sites.get(&name).and_then(|s| s.app.clone());
+    let routing = |a: &Option<config::NodeApp>| a.as_ref().map(|a| (a.serve, a.port));
+    let changed = routing(&before) != routing(&Some(config.clone()));
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().app = Some(config)).await?;
+    if changed {
+        restart_web_servers(&app, &state).await?;
+    }
+    Ok(())
+}
+
+/// Gets a project ready to start: a free port (the saved one while it's still free) and
+/// the web server for its domain running. The domain switches to the app once its port
+/// listens (see `watch_ports`). Returns a note when the web server couldn't start; the app
+/// still runs on its port then.
+async fn prepare_app(app: &AppHandle, state: &AppState, name: &str) -> Result<Option<String>> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, name)?;
+    let saved = settings.sites.get(name).and_then(|s| s.app.clone());
+    let mut config = saved.clone().unwrap_or_else(|| apps::suggest(&dir, 0));
+    let taken = settings.sites.iter().any(|(n, s)| n != name && s.app.as_ref().is_some_and(|a| a.port == config.port));
+    if config.port == 0 || taken || std::net::TcpListener::bind(("127.0.0.1", config.port)).is_err() {
+        config.port = apps::free_port(&settings);
+    }
+    if saved.as_ref() != Some(&config) {
+        let to_save = config.clone();
+        state.update_settings(|s| s.sites.entry(name.to_string()).or_default().app = Some(to_save)).await?;
+    }
+    if !config.serve || sites::language(&dir) != sites::Language::Node {
+        return Ok(None);
+    }
+    let kind = server_kind(sites::site_server(&settings, name));
+    let _op = state.ops.lock().await;
+    if state.supervisor.is_running(kind).await {
+        return Ok(None);
+    }
+    // The domain needs the web server; it starts with the site (and its certificate).
+    let (settings, layout) = state.snapshot().await;
+    Ok(state
+        .supervisor
+        .start(app, kind, &settings, &layout)
+        .await
+        .err()
+        .map(|e| format!("{} didn't start, so {} isn't reachable at its domain yet: {e}", kind.label(), name)))
+}
+
+fn server_kind(server: config::Server) -> ServiceKind {
+    if server == config::Server::Nginx { ServiceKind::Nginx } else { ServiceKind::Apache }
+}
+
+/// Keeps every project's domain pointed at what it's serving: the port its processes
+/// listen on (a dev server from LampRabit or your own terminal), or its files when nothing
+/// listens. Runs every few seconds, and straight away when an app starts or stops.
+async fn watch_ports(handle: AppHandle) {
+    let mut system = sysinfo::System::new();
+    // A route is dropped only after its port has been gone for two scans, so a dev server
+    // restarting itself (on a config change) doesn't flip the site to its files and back.
+    let mut missing: std::collections::BTreeMap<String, u8> = Default::default();
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {}
+            _ = ports::WAKE.notified() => {}
+        }
+        let state = handle.state::<AppState>();
+        let (settings, layout) = state.snapshot().await;
+        let sites = sites::scan(&settings, &layout);
+        let projects: Vec<(String, PathBuf)> = sites.iter().map(|s| (s.name.clone(), s.path.clone())).collect();
+        let Ok((found, back)) = tauri::async_runtime::spawn_blocking(move || {
+            let found = ports::discover(&mut system, &projects);
+            (found, system)
+        })
+        .await
+        else {
+            system = sysinfo::System::new();
+            continue;
+        };
+        system = back;
+
+        let statuses = state.apps.statuses().await;
+        let current = ports::routes();
+        let mut next = current.clone();
+        let mut servers: Vec<ServiceKind> = Vec::new();
+        let mut notes: Vec<String> = Vec::new();
+        // Servers a newly routed domain needs; started when they aren't running, since the
+        // dev server is only reachable at its domain through them.
+        let mut needed: Vec<ServiceKind> = Vec::new();
+        for site in &sites {
+            let own = settings.sites.get(&site.name);
+            let files_only = site.language == sites::Language::Node && own.and_then(|s| s.app.as_ref()).is_some_and(|a| !a.serve);
+            let status = statuses.iter().find(|s| s.name == site.name);
+            let managed = status.filter(|s| matches!(s.state, "starting" | "running")).and_then(|s| s.port);
+            let detected = found.get(&site.name).map(Vec::as_slice).unwrap_or_default();
+            if let (Some(s), Some(first)) = (status, detected.first()) {
+                if s.state == "starting" {
+                    let port = managed.filter(|p| detected.iter().any(|d| d.port == *p)).unwrap_or(first.port);
+                    state.apps.mark_ready(&handle, &site.name, port).await;
+                }
+            }
+            let want = ports::choose(site.language, files_only, own.and_then(|s| s.route_port), managed, detected);
+            if want.as_ref() == current.get(&site.name) {
+                missing.remove(&site.name);
+                continue;
+            }
+            if want.is_none() {
+                let gone = missing.entry(site.name.clone()).or_default();
+                *gone += 1;
+                if *gone < 2 {
+                    continue;
+                }
+            }
+            missing.remove(&site.name);
+            let note = match &want {
+                Some(r) => format!("{} is now served from port {}", site.domain, r.port),
+                None => format!("{}'s dev server stopped; serving its files", site.domain),
+            };
+            logs::system(&handle, logs::Level::Info, note.clone());
+            notes.push(note);
+            let kind = server_kind(site.server);
+            if want.is_some() && !needed.contains(&kind) {
+                needed.push(kind);
+            }
+            match want {
+                Some(r) => next.insert(site.name.clone(), r),
+                None => next.remove(&site.name),
+            };
+            if !servers.contains(&kind) {
+                servers.push(kind);
+            }
+        }
+        // Projects that disappeared lose their routes quietly.
+        next.retain(|name, _| sites.iter().any(|s| &s.name == name));
+        let detected_changed = ports::set_detected(found);
+        if next != current {
+            ports::set_routes(next);
+            let _op = state.ops.lock().await;
+            for kind in servers {
+                if state.supervisor.is_running(kind).await {
+                    // Without dropping connections where the server can; a restart otherwise.
+                    let (settings, layout) = state.snapshot().await;
+                    match state.supervisor.reload(&handle, kind, &settings, &layout).await {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(e) => {
+                            logs::system(&handle, logs::Level::Error, e.to_string());
+                            continue;
+                        }
+                    }
+                    state.supervisor.stop(&handle, kind).await;
+                    state.supervisor.wait_stopped(kind).await;
+                    let (settings, layout) = state.snapshot().await;
+                    if let Err(e) = state.supervisor.start(&handle, kind, &settings, &layout).await {
+                        logs::system(&handle, logs::Level::Error, format!("{} didn't restart with the new routes: {e}", kind.label()));
+                    }
+                } else if needed.contains(&kind) {
+                    let (settings, layout) = state.snapshot().await;
+                    if let Err(e) = state.supervisor.start(&handle, kind, &settings, &layout).await {
+                        let note = format!("{} didn't start, so the domain can't reach the dev server yet: {e}", kind.label());
+                        logs::system(&handle, logs::Level::Error, note.clone());
+                        notes.push(note);
+                    }
+                }
+            }
+            // The notes say where domains moved (shown as notifications).
+            let _ = tauri::Emitter::emit(&handle, "routes-changed", &notes);
+        } else if detected_changed {
+            let _ = tauri::Emitter::emit(&handle, "routes-changed", Vec::<String>::new());
+        }
+    }
+}
+
+/// Picks the port a project's domain goes to when it listens on several; None goes back
+/// to choosing automatically.
+#[tauri::command]
+async fn set_site_route(state: State<'_, AppState>, name: String, port: Option<u16>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().route_port = port).await?;
+    ports::poke();
+    Ok(())
+}
+
+/// Starts a project's dev server and serves its domain through it.
+#[tauri::command]
+async fn app_start(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<apps::AppStatus> {
+    let status = state.apps.status(&name).await;
+    if matches!(status.state, "starting" | "running") {
+        return Ok(status);
+    }
+    let note = prepare_app(&app, &state, &name).await?;
+    let (settings, layout) = state.snapshot().await;
+    let status = state.apps.start(&app, &settings, &layout, &name).await?;
+    if let Some(note) = note {
+        state.apps.record(&app, &layout, &name, "error", note).await;
+    }
+    Ok(status)
+}
+
+#[tauri::command]
+async fn app_stop(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+    state.apps.stop(&app, &name).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn app_restart(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<apps::AppStatus> {
+    state.apps.stop(&app, &name).await;
+    app_start(app, state, name).await
+}
+
+/// Installs a project's dependencies with its package manager.
+#[tauri::command]
+async fn app_install(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    state.apps.install(&app, &settings, &layout, &name).await
+}
+
+#[tauri::command]
+async fn app_statuses(state: State<'_, AppState>) -> Result<Vec<apps::AppStatus>> {
+    Ok(state.apps.statuses().await)
+}
+
+#[tauri::command]
+async fn app_logs(state: State<'_, AppState>, name: String) -> Result<Vec<String>> {
+    let (_, layout) = state.snapshot().await;
+    Ok(state.apps.logs(&layout, &name).await)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectCommands {
+    commands: Vec<commands::Command>,
+    /// Sources that couldn't be listed, with why.
+    problems: Vec<String>,
+    sources: Vec<commands::Source>,
+}
+
+/// Every command a project can run: yours, its template's, and those discovered from
+/// package.json, composer.json and the framework CLIs.
+#[tauri::command]
+async fn project_commands(state: State<'_, AppState>, name: String) -> Result<ProjectCommands> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let site = settings.sites.get(&name).cloned().unwrap_or_default();
+    let template = site.template.as_deref().and_then(|t| templates::find(&layout, t.split('@').next().unwrap_or(t)).ok()).map(|(t, _)| t);
+    let declared = template.as_ref().and_then(|t| t.commands.clone()).unwrap_or_default();
+    let sources = declared.discover.clone().unwrap_or_else(|| commands::detect(&dir));
+    let pm = site.app.as_ref().and_then(|a| a.package_manager).unwrap_or_else(|| apps::detect_package_manager(&dir));
+    let path = apps::Apps::command_path(&settings, &layout, &name);
+    let (discovered, problems) = commands::discover(&dir, &sources, &path, pm).await;
+
+    // Template commands may use the project's names and package manager.
+    let url = sites::url_for(&settings, &name).unwrap_or_default().trim_end_matches('/').to_string();
+    let mut values = std::collections::BTreeMap::from([
+        ("project".to_string(), name.clone()),
+        ("domain".into(), url.split("://").nth(1).unwrap_or_default().to_string()),
+        ("url".into(), url),
+    ]);
+    if let Ok(pmc) = apps::pm_commands(pm, &path) {
+        values.extend([
+            ("pm".to_string(), pmc.id.to_string()),
+            ("pm.run".into(), pmc.run.clone()),
+            ("pm.args".into(), pmc.args.into()),
+            ("pm.exec".into(), pmc.exec.clone()),
+            ("pm.install".into(), pmc.install.clone()),
+            ("pm.add".into(), pmc.add.clone()),
+        ]);
+    }
+    let values = templates::Values(values);
+    let mut list: Vec<commands::Command> = site
+        .commands
+        .iter()
+        .map(|c| commands::Command { group: "Yours".into(), name: c.name.clone(), command: c.run.clone(), description: None, origin: "yours" })
+        .collect();
+    if let Some(t) = &template {
+        list.extend(declared.list.iter().map(|c| commands::Command {
+            group: t.name.clone(),
+            name: c.name.clone(),
+            command: values.render(&c.run),
+            description: c.description.clone(),
+            origin: "template",
+        }));
+    }
+    list.extend(discovered);
+    Ok(ProjectCommands { commands: list, problems, sources })
+}
+
+/// Runs a command in a project's folder; its output goes to the project's log.
+#[tauri::command]
+async fn run_project_command(app: AppHandle, state: State<'_, AppState>, name: String, label: String, command: String) -> Result<()> {
+    let (settings, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    if command.trim().is_empty() {
+        return Err(Error::msg("Enter a command to run."));
+    }
+    state.apps.run_command(&app, &settings, &layout, &name, &label, &command).await
+}
+
+#[tauri::command]
+async fn stop_project_command(state: State<'_, AppState>, name: String) -> Result<()> {
+    state.apps.stop_command(&name).await;
+    Ok(())
+}
+
+/// Saves the commands the user added to a project.
+#[tauri::command]
+async fn save_project_commands(state: State<'_, AppState>, name: String, commands: Vec<commands::UserCommand>) -> Result<()> {
+    let (_, layout) = state.snapshot().await;
+    project_dir(&layout, &name)?;
+    let cleaned: Vec<commands::UserCommand> = commands.into_iter().filter(|c| !c.name.trim().is_empty() && !c.run.trim().is_empty()).collect();
+    state.update_settings(|s| s.sites.entry(name.clone()).or_default().commands = cleaned).await?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFacts {
+    #[serde(flatten)]
+    facts: facts::Facts,
+    /// The template it was created from (its name), when LampRabit created it.
+    template: Option<String>,
+}
+
+/// Everything the Overview shows about a project beyond what the site list has.
+#[tauri::command]
+async fn project_facts(state: State<'_, AppState>, name: String) -> Result<ProjectFacts> {
+    let (settings, layout) = state.snapshot().await;
+    let dir = project_dir(&layout, &name)?;
+    let site = sites::scan(&settings, &layout).into_iter().find(|s| s.name == name);
+    let own = settings.sites.get(&name);
+    let pm = own.and_then(|s| s.app.as_ref()).and_then(|a| a.package_manager).unwrap_or_else(|| apps::detect_package_manager(&dir));
+    let template = own.and_then(|s| s.template.clone()).map(|id| {
+        let id = id.split('@').next().unwrap_or(&id).to_string();
+        templates::find(&layout, &id).map(|(t, _)| t.name).unwrap_or(id)
+    });
+    Ok(ProjectFacts { facts: facts::read(&dir, site.and_then(|s| s.framework), pm.id()).await, template })
+}
+
+/// A free port from 3000 up that no other project uses.
+#[tauri::command]
+async fn app_free_port(state: State<'_, AppState>) -> Result<u16> {
+    Ok(apps::free_port(&*state.settings.read().await))
 }
 
 /// Shares a site (by folder name) or a local port on a public URL.
@@ -865,18 +1281,18 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
         &[
-            &MenuItem::with_id(app, "open", "Open lampRabit", true, None::<&str>)?,
+            &MenuItem::with_id(app, "open", "Open LampRabit", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "start", "Start all", true, None::<&str>)?,
             &MenuItem::with_id(app, "stop", "Stop all", true, None::<&str>)?,
             &MenuItem::with_id(app, "www", "Open www folder", true, None::<&str>)?,
             &MenuItem::with_id(app, "terminal", "Open terminal", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "quit", "Quit lampRabit", true, None::<&str>)?,
+            &MenuItem::with_id(app, "quit", "Quit LampRabit", true, None::<&str>)?,
         ],
     )?;
     let mut tray = TrayIconBuilder::with_id("main")
-        .tooltip("lampRabit")
+        .tooltip("LampRabit")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
@@ -1041,7 +1457,7 @@ struct PortStatus {
     key: &'static str,
     port: u16,
     free: bool,
-    /// Set when one of lampRabit's own services holds the port.
+    /// Set when one of LampRabit's own services holds the port.
     used_by_service: Option<&'static str>,
     owner: Option<diagnose::PortOwner>,
 }
@@ -1073,11 +1489,11 @@ async fn port_status(state: State<'_, AppState>) -> Result<Vec<PortStatus>> {
     Ok(out)
 }
 
-/// Stops a process that is blocking a port. Refuses system processes and lampRabit's own.
+/// Stops a process that is blocking a port. Refuses system processes and LampRabit's own.
 #[tauri::command]
 async fn stop_process(app: AppHandle, state: State<'_, AppState>, pid: u32) -> Result<()> {
     if pid == 0 || pid == 4 || pid == std::process::id() || state.supervisor.pids().await.contains_key(&pid) {
-        return Err(Error::msg("lampRabit won't stop that process."));
+        return Err(Error::msg("LampRabit won't stop that process."));
     }
     let status = if cfg!(windows) {
         let mut cmd = tokio::process::Command::new("taskkill");
@@ -1115,13 +1531,13 @@ async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String>
     let mut r = String::new();
     let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
 
-    let _ = writeln!(r, "# lampRabit diagnostics\n");
+    let _ = writeln!(r, "# LampRabit diagnostics\n");
     let generated = now
         .format(time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"))
         .unwrap_or_default();
     let _ = writeln!(r, "Generated {generated}\n");
     let _ = writeln!(r, "## System\n");
-    let _ = writeln!(r, "- lampRabit {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(r, "- LampRabit {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(r, "- OS: {} {} ({})", std::env::consts::OS, os_version().await, std::env::consts::ARCH);
     if cfg!(windows) {
         let sys = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into())).join("System32");
@@ -1171,7 +1587,7 @@ async fn diagnostics(state: State<'_, AppState>, redact: bool) -> Result<String>
         let status = if p.free {
             "free".to_string()
         } else if let Some(svc) = p.used_by_service {
-            format!("in use by lampRabit ({svc})")
+            format!("in use by LampRabit ({svc})")
         } else if let Some(o) = &p.owner {
             format!("in use by {} (PID {})", o.name, o.pid)
         } else {
@@ -1425,7 +1841,7 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .on_window_event(|window, event| {
-            // Closing keeps lampRabit (and its services) running in the tray.
+            // Closing keeps LampRabit (and its services) running in the tray.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
                 let to_tray = tauri::async_runtime::block_on(async { state.settings.read().await.close_to_tray });
@@ -1451,12 +1867,12 @@ pub fn run() {
             let (mut settings, broken) = Settings::load_or_recover(&settings_path);
             if let Some(aside) = broken {
                 warnings.push(format!(
-                    "Your settings file was damaged, so lampRabit started with default settings. The old file was kept as {}.",
+                    "Your settings file was damaged, so LampRabit started with default settings. The old file was kept as {}.",
                     aside.display()
                 ));
             }
             if let Err(e) = Layout::new(&settings.root_dir).ensure() {
-                warnings.push(format!("lampRabit can't use its environment folder {}: {e}. Choose another one in Settings → General.", settings.root_dir.display()));
+                warnings.push(format!("LampRabit can't use its environment folder {}: {e}. Choose another one in Settings → General.", settings.root_dir.display()));
             }
             runtimes::clean_removed(&Layout::new(&settings.root_dir));
             runtimes::migrate_flat_composer(&Layout::new(&settings.root_dir));
@@ -1474,13 +1890,14 @@ pub fn run() {
                 tunnels: tunnels::Tunnels::default(),
                 ops: Mutex::new(()),
                 processes: std::sync::Mutex::new(sysinfo::System::new()),
+                apps: apps::Apps::default(),
             });
             app.manage(logs::LogHub::default());
             {
                 let root = app.state::<AppState>().settings.try_read().map(|s| s.root_dir.clone()).unwrap_or_default();
                 logs::set_system_file(app.handle(), Layout::new(root).logs().join("lampRabit.log"));
             }
-            logs::system(app.handle(), logs::Level::Info, format!("lampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
+            logs::system(app.handle(), logs::Level::Info, format!("LampRabit {} started on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
             for w in &warnings {
                 logs::system(app.handle(), logs::Level::Warn, w.clone());
             }
@@ -1513,6 +1930,8 @@ pub fn run() {
                     state.supervisor.check_health(&handle, &settings, &state.http).await;
                 }
             });
+
+            tauri::async_runtime::spawn(watch_ports(app.handle().clone()));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -1554,6 +1973,21 @@ pub fn run() {
             uninstall,
             list_templates,
             open_templates_folder,
+            app_info,
+            app_save,
+            app_start,
+            app_stop,
+            app_restart,
+            app_install,
+            app_statuses,
+            app_logs,
+            app_free_port,
+            project_facts,
+            set_site_route,
+            project_commands,
+            run_project_command,
+            stop_project_command,
+            save_project_commands,
             apply_services,
             service_usage,
             check_port,
@@ -1601,12 +2035,13 @@ pub fn run() {
             set_active_version,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building lampRabit")
+        .expect("error while building LampRabit")
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 let state = app.state::<AppState>();
                 tauri::async_runtime::block_on(async {
                     state.tunnels.stop_all().await;
+                    state.apps.stop_all().await;
                     state.supervisor.shutdown().await;
                 });
             }

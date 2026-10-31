@@ -22,6 +22,7 @@ import {
   Moon,
   Pencil,
   Play,
+  RotateCcw,
   Plus,
   RotateCw,
   ScrollText,
@@ -212,9 +213,15 @@ export default function Overview() {
             </Button>
           ) : (
             <>
-              <Button variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S">
-                <Play size={14} /> {stack.profile ? `Start ${stack.profile.name}` : "Start all"}
-              </Button>
+              {stack.up ? (
+                <Button variant="primary" onClick={stack.restartRunning} disabled={stack.busy} title="Restart the running services (Shift+R)">
+                  <RotateCcw size={14} /> Restart
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={stack.startStack} disabled={stack.busy} title="Shift+S">
+                  <Play size={14} /> {stack.profile ? `Start ${stack.profile.name}` : "Start all"}
+                </Button>
+              )}
               <Button onClick={stack.stopAll} disabled={stack.busy || stack.running.length === 0} title="Shift+X">
                 <Square size={12} className="fill-current" /> Stop all
               </Button>
@@ -242,8 +249,9 @@ export default function Overview() {
               onDelete={(name) => {
                 if (window.confirm(`Delete the “${name}” profile?`)) deleteProfile.mutate(name);
               }}
-              onStartAll={stack.startStack}
+              onStartAll={stack.startAll}
               onStartProfile={stack.startProfile}
+              isUp={stack.isUp}
               busy={stack.busy}
             />
           )}
@@ -328,6 +336,7 @@ function ProfileTiles({
   onDelete,
   onStartAll,
   onStartProfile,
+  isUp,
   busy,
 }: {
   profiles: Settings["profiles"];
@@ -338,6 +347,8 @@ function ProfileTiles({
   onDelete: (name: string) => void;
   onStartAll: () => void;
   onStartProfile: (services: ServiceKind[]) => void;
+  /** Whether a profile's services (all services for []) are already running. */
+  isUp: (services: ServiceKind[]) => boolean;
   busy: boolean;
 }) {
   return (
@@ -351,6 +362,7 @@ function ProfileTiles({
       <div className="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3" role="radiogroup" aria-label="Service profiles">
         {[{ name: null, label: "All services", services: [] as ServiceKind[] }, ...profiles.map((p) => ({ ...p, label: p.name }))].map((profile) => {
           const selected = profile.name === active;
+          const up = isUp(profile.services);
           return (
             <article
               key={profile.name ?? "all"}
@@ -385,12 +397,20 @@ function ProfileTiles({
               </button>
               <Button
                 size="sm"
-                variant={selected ? "primary" : "soft"}
+                variant={selected && !up ? "primary" : "soft"}
                 className="mt-2 w-full justify-center"
-                disabled={busy}
-                onClick={() => profile.name ? onStartProfile(profile.services) : onStartAll()}
+                disabled={busy || up}
+                onClick={() => (profile.name ? onStartProfile(profile.services) : onStartAll())}
               >
-                <Play size={12} /> Start {profile.name ?? "all"}
+                {up ? (
+                  <>
+                    <Check size={12} /> Running
+                  </>
+                ) : (
+                  <>
+                    <Play size={12} /> Start {profile.name ?? "all"}
+                  </>
+                )}
               </Button>
             </article>
           );

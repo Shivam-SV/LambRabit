@@ -31,7 +31,7 @@ pub enum Runtime {
     /// Public tunnels for sharing sites.
     Ngrok,
     Cloudflared,
-    /// Redis with redis-cli: lampRabit's builds on Linux and macOS, the community
+    /// Redis with redis-cli: LampRabit's builds on Linux and macOS, the community
     /// redis-windows build (Redis compiled with MSYS2) on Windows.
     Redis,
     /// PHP's package manager, a single `composer.phar` run by the active PHP.
@@ -40,8 +40,8 @@ pub enum Runtime {
     Mysql,
     /// Web interface for Redis, served like phpMyAdmin.
     Phpredisadmin,
-    /// Memcached: lampRabit's builds on Linux and macOS, nono303's Cygwin build
-    /// (repackaged by lampRabit's CI) on Windows.
+    /// Memcached: LampRabit's builds on Linux and macOS, nono303's Cygwin build
+    /// (repackaged by LampRabit's CI) on Windows.
     Memcached,
 }
 
@@ -179,13 +179,13 @@ pub async fn available(client: &reqwest::Client, runtime: Runtime) -> Result<Vec
     Ok(releases)
 }
 
-/// Where lampRabit's own builds are published: Apache, Nginx, PHP, Redis and Memcached for
+/// Where LampRabit's own builds are published: Apache, Nginx, PHP, Redis and Memcached for
 /// Linux and macOS, and Memcached for Windows (see build/linux/ and
 /// .github/workflows/binaries.yml).
 /// `LAMPRABIT_BINARIES_URL` points elsewhere, for testing new builds or a mirror.
 const LINUX_BUILDS: &str = "https://github.com/Shivam-SV/LampRabit/releases/download/binaries/";
 
-/// lampRabit's builds of one runtime for this OS and CPU, from the published manifest.
+/// LampRabit's builds of one runtime for this OS and CPU, from the published manifest.
 async fn own_builds(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Release>> {
     let base = std::env::var("LAMPRABIT_BINARIES_URL").unwrap_or_else(|_| LINUX_BUILDS.to_string());
     let base = format!("{}/", base.trim_end_matches('/'));
@@ -194,7 +194,7 @@ async fn own_builds(client: &reqwest::Client, runtime: Runtime) -> Result<Vec<Re
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| Error::msg(format!("Couldn't load the list of lampRabit's builds: {e}")))?
+        .map_err(|e| Error::msg(format!("Couldn't load the list of LampRabit's builds: {e}")))?
         .json()
         .await
         .map_err(http)?;
@@ -619,7 +619,7 @@ async fn phpredisadmin_releases(client: &reqwest::Client) -> Result<Vec<Release>
     }])
 }
 
-/// phpRedisAdmin talks to Redis through Predis, normally installed by Composer. lampRabit
+/// phpRedisAdmin talks to Redis through Predis, normally installed by Composer. LampRabit
 /// adds the exact version its composer.json asks for, with a two-line autoloader, so
 /// neither Composer nor PHP is needed to install it.
 pub async fn add_predis(client: &reqwest::Client, layout: &Layout, version: &str) -> Result<()> {
@@ -650,7 +650,7 @@ pub async fn add_predis(client: &reqwest::Client, layout: &Layout, version: &str
     std::fs::create_dir_all(target.parent().unwrap())?;
     std::fs::rename(root, &target)?;
     let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::write(home.join("vendor").join("autoload.php"), "<?php\n// Written by lampRabit in place of Composer's autoloader.\nrequire __DIR__ . '/predis/predis/autoload.php';\n")?;
+    std::fs::write(home.join("vendor").join("autoload.php"), "<?php\n// Written by LampRabit in place of Composer's autoloader.\nrequire __DIR__ . '/predis/predis/autoload.php';\n")?;
     Ok(())
 }
 
@@ -714,7 +714,7 @@ pub fn migrate_flat_composer(layout: &Layout) {
     let _ = std::fs::remove_file(&flat);
 }
 
-/// lampRabit 0.1 ran Microsoft Garnet as Redis, with a private .NET runtime and (on
+/// LampRabit 0.1 ran Microsoft Garnet as Redis, with a private .NET runtime and (on
 /// Windows) a separate redis-cli. Real Redis replaced it everywhere, so those folders are
 /// deleted; Garnet's versions have no redis-server and already count as not installed.
 /// Returns whether Garnet was found, so the user can be told to install Redis again.
@@ -955,7 +955,7 @@ pub fn remove(layout: &Layout, runtime: Runtime, version: &str) -> Result<()> {
         }
     })?;
     if std::fs::remove_dir_all(&trash).is_err() {
-        // Already out of the way and invisible to lampRabit; cleaned up on a later start.
+        // Already out of the way and invisible to LampRabit; cleaned up on a later start.
         eprintln!("could not finish deleting {}", trash.display());
     }
     Ok(())

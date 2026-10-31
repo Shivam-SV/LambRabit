@@ -1,0 +1,85 @@
+schema: 1
+id: nextjs
+name: Next.js
+description: Next.js with your choice of language, router, styling and linter.
+icon: layers
+color: zinc
+duration: npm · about a minute
+requires:
+  node: true
+# create-next-app's own questions (create-next-app --help).
+variables:
+  - id: language
+    label: Language
+    type: choice
+    default: --ts
+    options:
+      - { value: --ts, label: TypeScript }
+      - { value: --js, label: JavaScript }
+  - id: router
+    label: Router
+    type: choice
+    default: --app
+    options:
+      - { value: --app, label: App Router (recommended) }
+      - { value: --no-app, label: Pages Router }
+  - id: linter
+    label: Linter
+    type: choice
+    default: --eslint
+    options:
+      - { value: --eslint, label: ESLint }
+      - { value: --biome, label: Biome }
+      - { value: --no-linter, label: None }
+  - id: tailwind
+    label: Tailwind CSS
+    type: bool
+    default: "true"
+    on: --tailwind
+    off: --no-tailwind
+  - id: src_dir
+    label: Put the code in a src/ folder
+    type: bool
+    default: "false"
+    on: --src-dir
+    off: --no-src-dir
+  - id: compiler
+    label: React Compiler
+    type: bool
+    default: "false"
+    on: --react-compiler
+    off: --no-react-compiler
+  - id: alias
+    label: Import alias
+    default: "@/*"
+    required: true
+steps:
+  - name: Creating the project with create-next-app
+    cwd: www
+    run: '{{pm.exec}} create-next-app@latest "{{project}}" --yes --use-{{pm}} --disable-git --no-agent-feedback {{vars.language}} {{vars.router}} {{vars.linter}} {{vars.tailwind}} {{vars.src_dir}} {{vars.compiler}} --import-alias "{{vars.alias}}"'
+  # Next.js blocks its dev resources (hot reload) for origins it doesn't know.
+  - name: Allowing {{domain}} in next.config
+    if: vars.language == --ts
+    replace:
+      file: next.config.ts
+      values:
+        "/* config options here */": 'allowedDevOrigins: ["{{domain}}"],'
+  - name: Allowing {{domain}} in next.config
+    if: vars.language == --js
+    replace:
+      file: next.config.mjs
+      values:
+        "/* config options here */": 'allowedDevOrigins: ["{{domain}}"],'
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New Next.js project
+commands:
+  discover: [package.json]
+serve:
+  mode: dynamic
+  command: "{{pm.run}} dev {{pm.args}} --hostname 127.0.0.1 --port {port}"
+done: Start it from the Sites page; it's served at {{url}}.

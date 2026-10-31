@@ -15,7 +15,7 @@ pub struct PortOwner {
     pub name: String,
     /// What this program usually is and how to free the port.
     pub note: Option<String>,
-    /// Whether lampRabit may offer to stop it (never system processes).
+    /// Whether LampRabit may offer to stop it (never system processes).
     pub stoppable: bool,
 }
 
@@ -98,9 +98,9 @@ fn owner_note(pid: u32, name: &str) -> Option<String> {
     let note = if pid == 4 || name == "system" {
         "This is Windows' built-in HTTP server (http.sys), usually IIS / World Wide Web Publishing Service, \
          SQL Server Reporting Services or Web Deploy. Stop that service (or run `net stop http /y` in an \
-         administrator terminal), or give lampRabit another port."
+         administrator terminal), or give LampRabit another port."
     } else if name.contains("httpd") || name.contains("apache") {
-        "Another Apache is running, for example from XAMPP, Laragon or WAMP. Stop it before starting lampRabit's."
+        "Another Apache is running, for example from XAMPP, Laragon or WAMP. Stop it before starting LampRabit's."
     } else if name.contains("nginx") {
         "An Nginx server is running."
     } else if name.contains("mysqld") || name.contains("mariadbd") {
@@ -147,7 +147,7 @@ const PATTERNS: &[(&str, &str, &str)] = &[
     (
         "Syntax error on line",
         "Apache configuration error",
-        "A config file has an invalid line. If it is in etc/apache/sites/, fix or remove that file; lampRabit's own files are regenerated on start.",
+        "A config file has an invalid line. If it is in etc/apache/sites/, fix or remove that file; LampRabit's own files are regenerated on start.",
     ),
     (
         "php8apache2_4.dll",

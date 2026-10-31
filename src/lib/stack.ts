@@ -11,7 +11,7 @@ export function serverEnabled(kind: ServiceKind, mode: Settings["webServer"] | u
 
 /**
  * Starting and stopping groups of services: the active stack profile, a selection, or
- * everything. Shared by the Overview header, the title bar and the Shift+S / Shift+X keys.
+ * everything. Shared by the Home header, the title bar and the Shift+S / Shift+X / Shift+R keys.
  */
 export function useStack() {
   const queryClient = useQueryClient();
@@ -26,18 +26,40 @@ export function useStack() {
 
   const apply = useMutation({
     mutationFn: ({ start, stop }: { start: ServiceKind[]; stop: ServiceKind[] }) => api.applyServices(start, stop),
-    // The Overview shows each failure on its service's row; elsewhere a toast says it.
+    // Home shows each failure on its service's row; elsewhere a toast says it.
     onSuccess: (errors) => useAppStore.getState().page !== "overview" && errors.forEach((e) => notify("error", e)),
     onError: (e) => notify("error", String(e)),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["services"] }),
   });
 
+  // Restarts one at a time, so each failure is reported for its own service.
+  const restart = useMutation({
+    mutationFn: async (list: ServiceKind[]) => {
+      const errors: string[] = [];
+      for (const kind of list) await api.restartService(kind).catch((e) => errors.push(String(e)));
+      return errors;
+    },
+    onSuccess: (errors) => errors.forEach((e) => notify("error", e)),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["services"] }),
+  });
+
   const kinds = (list: ServiceInfo[]) => list.map((s) => s.kind);
+  const wanted = profile ? profile.services : kinds(usable);
+  // Services not installed (or a disabled web server) can't run, so they don't count.
+  const isUp = (list: ServiceKind[]) => {
+    const relevant = list.filter((k) => usable.some((s) => s.kind === k));
+    return relevant.length > 0 && relevant.every((k) => running.some((s) => s.kind === k));
+  };
   return {
     profile,
     usable,
     running,
-    busy: apply.isPending,
+    busy: apply.isPending || restart.isPending,
+    /** Everything Start would start is already running: offer Restart instead. */
+    up: isUp(wanted),
+    /** Whether every installed service of `list` (all of them when empty) is running. */
+    isUp: (list: ServiceKind[]) => isUp(list.length ? list : kinds(usable)),
+    restartRunning: () => restart.mutate(kinds(running)),
     start: (list: ServiceKind[]) => apply.mutate({ start: list, stop: [] }),
     stop: (list: ServiceKind[]) => apply.mutate({ start: [], stop: list }),
     /** The active profile's services, stopping running ones outside it; otherwise everything. */
@@ -45,6 +67,8 @@ export function useStack() {
       profile
         ? apply.mutate({ start: profile.services, stop: kinds(running).filter((k) => !profile.services.includes(k)) })
         : apply.mutate({ start: kinds(usable), stop: [] }),
+    /** Every installed service, whatever profile is active. */
+    startAll: () => apply.mutate({ start: kinds(usable), stop: [] }),
     startProfile: (services: ServiceKind[]) =>
       apply.mutate({ start: services, stop: kinds(running).filter((k) => !services.includes(k)) }),
     stopAll: () => apply.mutate({ start: [], stop: kinds(running) }),

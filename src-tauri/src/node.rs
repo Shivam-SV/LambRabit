@@ -65,6 +65,7 @@ fn env_var(name: &str) -> Option<String> {
 }
 
 /// Expands %VAR% references (REG_EXPAND_SZ values).
+#[cfg(windows)]
 fn expand(value: &str) -> String {
     let mut out = String::new();
     let mut rest = value;
@@ -331,6 +332,77 @@ pub async fn install_nvm(app: &AppHandle, client: &reqwest::Client, layout: &Lay
     Ok(())
 }
 
+/// Where NVM keeps installed versions: nvm-windows' NVM_HOME\v<version>, nvm-sh's
+/// $NVM_DIR/versions/node/v<version>.
+fn versions_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        nvm_windows().and_then(|(exe, _)| exe.parent().map(PathBuf::from))
+    } else {
+        nvm_sh_dir().map(|d| d.join("versions").join("node"))
+    }
+}
+
+/// The folder with a version's `node` and `npm`.
+fn bin_of(version: &str) -> Option<PathBuf> {
+    let dir = versions_dir()?.join(format!("v{version}"));
+    Some(if cfg!(windows) { dir } else { dir.join("bin") })
+}
+
+/// Versions installed with NVM, newest first, read from disk (no nvm process, so it's
+/// cheap enough to call on every app start).
+pub fn installed_versions() -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(versions_dir().unwrap_or_default())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.strip_prefix('v').map(str::to_string))
+        .filter(|v| v.split('.').count() == 3 && v.split('.').all(|p| p.parse::<u32>().is_ok()))
+        .collect();
+    out.sort_by_key(|v| std::cmp::Reverse(v.split('.').filter_map(|p| p.parse::<u32>().ok()).collect::<Vec<_>>()));
+    out
+}
+
+/// The installed version a spec asks for: "22", "22.1", "v22.1.0"; "node", "lts/*" and
+/// LTS names pick the newest installed one.
+pub fn resolve(spec: &str, installed: &[String]) -> Option<String> {
+    let spec = spec.trim().trim_start_matches('v');
+    if spec == "node" || spec == "stable" || spec.starts_with("lts") {
+        return installed.first().cloned();
+    }
+    installed.iter().find(|v| *v == spec || v.starts_with(&format!("{spec}."))).cloned()
+}
+
+/// NVM's default: nvm-windows' active version (its symlink), nvm-sh's `default` alias.
+fn default_version(installed: &[String]) -> Option<String> {
+    if cfg!(windows) {
+        let target = std::fs::read_link(env_var("NVM_SYMLINK")?).ok()?;
+        let name = target.file_name()?.to_str()?.trim_start_matches('v').to_string();
+        installed.contains(&name).then_some(name)
+    } else {
+        let alias = std::fs::read_to_string(nvm_sh_dir()?.join("alias").join("default")).ok()?;
+        resolve(alias.trim(), installed)
+    }
+}
+
+/// The Node version and folder a project's processes use: the one chosen for it, else
+/// its .nvmrc, else NVM's default. Running from that folder means each project gets its
+/// own version without switching NVM's global one.
+pub fn for_project(chosen: Option<&str>, project: &std::path::Path) -> Result<(String, PathBuf)> {
+    let installed = installed_versions();
+    if installed.is_empty() {
+        return Err(Error::msg("No Node.js versions are installed. Install one from Services → Node.js."));
+    }
+    let wanted = chosen.map(str::to_string).or_else(|| project_version(project));
+    let version = match &wanted {
+        Some(spec) => resolve(spec, &installed).ok_or_else(|| {
+            Error::msg(format!("This project wants Node {spec}, which isn't installed. Install it from Services → Node.js, or pick another version."))
+        })?,
+        None => default_version(&installed).unwrap_or_else(|| installed[0].clone()),
+    };
+    let bin = bin_of(&version).ok_or_else(|| Error::msg("NVM isn't installed. Install it from Services → Node.js."))?;
+    Ok((version, bin))
+}
+
 /// The Node version a project asks for in .nvmrc / .node-version, if any.
 pub fn project_version(dir: &std::path::Path) -> Option<String> {
     [".nvmrc", ".node-version"]
@@ -343,6 +415,16 @@ pub fn project_version(dir: &std::path::Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_nvmrc_specs() {
+        let installed = vec!["24.22.1".to_string(), "22.23.4".to_string(), "22.1.0".to_string()];
+        assert_eq!(resolve("22", &installed).as_deref(), Some("22.23.4"));
+        assert_eq!(resolve("v22.1", &installed).as_deref(), Some("22.1.0"));
+        assert_eq!(resolve("lts/jod", &installed).as_deref(), Some("24.22.1"));
+        assert_eq!(resolve("2", &installed), None, "a major must match exactly, not as a prefix");
+        assert_eq!(resolve("20", &installed), None);
+    }
 
     #[test]
     fn parses_nvm_windows_list() {

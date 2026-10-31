@@ -2,7 +2,7 @@
 //!
 //! Apache on Windows runs a parent and a worker process; killing only the parent can
 //! leave the worker holding the port. Each service therefore runs in its own Windows
-//! Job Object (killed as a unit, and automatically if lampRabit itself dies) or, on
+//! Job Object (killed as a unit, and automatically if LampRabit itself dies) or, on
 //! Unix, its own process group.
 
 use tokio::process::{Child, Command};

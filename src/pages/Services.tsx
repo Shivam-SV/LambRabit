@@ -22,16 +22,16 @@ import { TunnelsPanel } from "../components/Tunnels";
 
 /** `source` describes the download on Windows; `unix`, where it differs, on Linux and macOS. */
 const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> = {
-  apache: { blurb: "Serves your sites", source: "Apache Lounge builds", unix: "lampRabit's builds of Apache httpd" },
+  apache: { blurb: "Serves your sites", source: "Apache Lounge builds", unix: "LampRabit's builds of Apache httpd" },
   nginx: {
     blurb: "Serves your sites",
     source: "Official nginx.org Windows builds (PGP-signed, no checksum)",
-    unix: "lampRabit's builds of nginx.org releases",
+    unix: "LampRabit's builds of nginx.org releases",
   },
   php: {
     blurb: "Runs your code",
     source: "Thread-safe builds from windows.php.net",
-    unix: "lampRabit's static builds with common extensions built in, Redis and Memcached clients included",
+    unix: "LampRabit's static builds with common extensions built in, Redis and Memcached clients included",
   },
   mariadb: { blurb: "Stores your data", source: "Official MariaDB releases" },
   mysql: { blurb: "Stores your data", source: "Official MySQL releases; runs next to MariaDB on its own port" },
@@ -42,15 +42,15 @@ const roles: Record<Runtime, { blurb: string; source: string; unix?: string }> =
   redis: {
     blurb: "Cache and queues",
     source: "Real Redis from the community redis-windows build (Redis has no official Windows build), with redis-cli",
-    unix: "lampRabit's builds of Redis, with redis-cli",
+    unix: "LampRabit's builds of Redis, with redis-cli",
   },
   cloudflared: { blurb: "Public tunnels", source: "Cloudflare quick tunnels, no account needed" },
-  composer: { blurb: "PHP packages", source: "PHP's package manager; run composer from the lampRabit terminal" },
+  composer: { blurb: "PHP packages", source: "PHP's package manager; run composer from the LampRabit terminal" },
   phpredisadmin: { blurb: "Redis admin", source: "Browse and edit Redis keys in the browser, like phpMyAdmin" },
   memcached: {
     blurb: "Memory cache",
-    source: "nono303's Windows build of Memcached (no official one exists), checked and repackaged by lampRabit",
-    unix: "lampRabit's builds of Memcached",
+    source: "nono303's Windows build of Memcached (no official one exists), checked and repackaged by LampRabit",
+    unix: "LampRabit's builds of Memcached",
   },
 };
 
@@ -90,7 +90,7 @@ export default function Services() {
   } else if (runtime === "composer" && !find("php")?.active) {
     note = "Composer runs on PHP: install a PHP version first.";
   } else if (runtime === "redis" && find("redis")?.active && !settings.data?.addToPath) {
-    note = "redis-cli works in lampRabit's terminal. Enable Add lampRabit's commands to PATH in Settings → Terminal to use it anywhere.";
+    note = "redis-cli works in LampRabit's terminal. Enable Add LampRabit's commands to PATH in Settings → Terminal to use it anywhere.";
   } else if (runtime === "phpredisadmin" && !find("redis")?.active) {
     note = "Install Redis to browse its keys here.";
   }
@@ -115,7 +115,7 @@ export default function Services() {
       <PageHeader title="Services" subtitle="Choose a service to manage its versions, settings, and tools." />
       <div className="grid items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
         {/* Sized to the space under the header (title bar, page header, room for the tab bar), so the list scrolls on its own and the page only when a service's details are taller. */}
-        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-19.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
+        <nav aria-label="Services" className="scrollbar-thin hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-12rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-2">
           <div className="space-y-6">
             {groups.map((group) => (
               <section key={group.id} aria-labelledby={`service-group-${group.id}`}>
