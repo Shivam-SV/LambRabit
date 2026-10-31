@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The MSI installer's counterpart of hooks.nsh: uninstalling runs LampRabit.exe with its
+  uninstall-cleanup flag (src-tauri/src/uninstall.rs), which removes LampRabit's runtimes,
+  configs, logs, certificates, hosts entries, PATH entry and settings, and keeps www and data.
+
+  Tauri's MSI config can only reference components, so the cleanup hangs off one: referencing
+  LampRabitCleanup (bundle.windows.wix.componentRefs) links this whole fragment in.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="LampRabitCleanup" Guid="6f0a7c2e-4b1d-4f7e-9d43-1c5e2a8b9f10">
+        <RegistryValue Root="HKLM" Key="Software\LampRabit\Installer" Name="CleanupOnUninstall" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!--
+      Deferred so it runs while the files are still there (before RemoveFiles), and
+      impersonated so it runs as the user: the settings, PATH entry and token it removes are
+      per user, and it asks for administrator rights itself where it needs them (hosts file,
+      certificate). "Path" is the main executable's File Id in Tauri's template.
+      Return="ignore": a failed cleanup must not block uninstalling.
+    -->
+    <CustomAction Id="LampRabitUninstallCleanup" FileKey="Path" ExeCommand="--uninstall-cleanup" Execute="deferred" Impersonate="yes" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- A real uninstall only: a major upgrade (an update) removes the old version too, and must keep everything. -->
+      <Custom Action="LampRabitUninstallCleanup" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

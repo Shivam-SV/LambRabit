@@ -42,9 +42,23 @@ pub struct NewProject {
     /// Optional steps, by id: run or not (absent: the step's default).
     #[serde(default)]
     pub optional: HashMap<String, bool>,
-    /// The user saw and accepted the risky steps of a template that didn't ship with lampRabit.
+    /// The user saw and accepted the risky steps of a template that didn't ship with LampRabit.
     #[serde(default)]
     pub approve_risky: bool,
+    /// Node templates: an NVM-installed version (None: NVM's default).
+    #[serde(default)]
+    pub node: Option<String>,
+    /// Node templates: the package manager to create and run the project with.
+    #[serde(default)]
+    pub package_manager: Option<crate::config::PackageManager>,
+}
+
+/// What a finished template leaves for the app to save.
+pub struct Built {
+    /// The template's "what next".
+    pub note: Option<String>,
+    /// A Node project's run setup (without its port, which the caller picks).
+    pub app: Option<crate::config::NodeApp>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -134,7 +148,15 @@ async fn run(ctx: &Ctx<'_>, program: &Path, args: &[String], cwd: &Path, extra_p
         .env("COMPOSER_HOME", ctx.layout.data("composer"))
         .env("COMPOSER_NO_INTERACTION", "1")
         // Large dependency trees (Magento) need more than PHP's default memory limit.
-        .env("COMPOSER_MEMORY_LIMIT", "-1");
+        .env("COMPOSER_MEMORY_LIMIT", "-1")
+        // npx and `npm create` otherwise ask before downloading a package.
+        .env("npm_config_yes", "true");
+    // PHP that a step starts by itself (Composer scripts, `php artisan serve`) gets no -c;
+    // PHPRC points it at LampRabit's php.ini for the step's PHP version.
+    let php_bins = ctx.layout.bin("php", "_");
+    if let Some(version) = php_bins.parent().and_then(|root| extra_path.iter().find_map(|p| p.strip_prefix(root).ok()?.iter().next())) {
+        cmd.env("PHPRC", ctx.layout.etc("php").join(version));
+    }
     if !extra_path.is_empty() {
         let existing = std::env::var_os("PATH").unwrap_or_default();
         let paths = extra_path.iter().cloned().chain(std::env::split_paths(&existing));
@@ -183,7 +205,7 @@ async fn run(ctx: &Ctx<'_>, program: &Path, args: &[String], cwd: &Path, extra_p
 }
 
 /// Drops terminal colour codes (`ESC[...m`), which Composer scripts print with --ansi.
-fn strip_ansi(line: &str) -> String {
+pub fn strip_ansi(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
@@ -283,7 +305,7 @@ fn set_env(path: &Path, values: &[(String, String)]) -> Result<()> {
 }
 
 /// Values for a template's placeholders: the project, its database and Mailpit.
-fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: Option<&str>) -> Values {
+fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: Option<&str>, node: Option<(&str, &crate::apps::PmCommands)>) -> Values {
     let server = ctx.settings.database().unwrap_or_default();
     // Doctrine tells the two apart by serverVersion: "11.8.9-MariaDB" or "8.4.13".
     let version = ctx.settings.database_version(server).cloned().unwrap_or_else(|| "8.0".into());
@@ -307,9 +329,23 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
         ("mail.host".into(), "127.0.0.1".into()),
         ("mail.port".into(), ctx.settings.ports.mail_smtp.to_string()),
     ]);
+    if let Some((version, pm)) = node {
+        map.extend([
+            ("node_version".to_string(), version.to_string()),
+            ("pm".into(), pm.id.into()),
+            ("pm.run".into(), pm.run.clone()),
+            ("pm.args".into(), pm.args.into()),
+            ("pm.exec".into(), pm.exec.clone()),
+            ("pm.create".into(), pm.create.clone()),
+            ("pm.install".into(), pm.install.clone()),
+            ("pm.add".into(), pm.add.clone()),
+        ]);
+    }
+    // Steps get what a variable renders (a flag, say); conditions what was picked ("raw.").
     for v in &template.variables {
         let value = req.variables.get(&v.id).cloned().or_else(|| v.default.clone()).unwrap_or_default();
-        map.insert(format!("vars.{}", v.id), value);
+        map.insert(format!("vars.{}", v.id), v.render(&value));
+        map.insert(format!("raw.vars.{}", v.id), value);
     }
     // Variables shown only under a condition (Adobe's keys for Adobe's download) are empty
     // otherwise, so nothing leaks into steps that don't apply.
@@ -318,6 +354,7 @@ fn values(ctx: &Ctx<'_>, req: &NewProject, template: &Template, url: &str, php: 
         if let Some(when) = &v.when {
             if !values.holds(when).unwrap_or(true) {
                 values.0.insert(format!("vars.{}", v.id), String::new());
+                values.0.insert(format!("raw.vars.{}", v.id), String::new());
             }
         }
     }
@@ -352,7 +389,7 @@ async fn has_tool(program: &str) -> bool {
 
 /// Everything a template needs, checked before anything is created: PHP version and
 /// extensions, and the tools its enabled steps use.
-async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str>, steps: &[usize]) -> Result<()> {
+async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str>, steps: &[usize], path: &std::ffi::OsString) -> Result<()> {
     if let (Some(minimum), Some(version)) = (template.requires.php.as_deref().filter(|m| *m != "any"), php) {
         if !at_least(version, minimum) {
             return Err(Error::msg(format!(
@@ -384,7 +421,7 @@ async fn check_requirements(ctx: &Ctx<'_>, template: &Template, php: Option<&str
             "node" => ("npm", "Install Node.js from Services → Node.js"),
             _ => ("git", "Install Git from git-scm.com"),
         };
-        if !has_tool(program).await {
+        if !crate::apps::on_path(program, path) && !has_tool(program).await {
             return Err(Error::msg(format!("A step of this template needs {program}, which isn't on your PATH. {hint}, or untick that step.")));
         }
     }
@@ -450,7 +487,7 @@ fn extract(ctx: &Ctx<'_>, bytes: Vec<u8>, url: &str, strip: Option<&str>, dir: &
 }
 
 /// How a template's shell command runs: cmd on Windows, sh elsewhere.
-fn shell(command: &str) -> (PathBuf, Vec<String>) {
+pub fn shell(command: &str) -> (PathBuf, Vec<String>) {
     if cfg!(windows) {
         (PathBuf::from("cmd"), vec!["/C".into(), command.into()])
     } else {
@@ -474,13 +511,39 @@ fn replace_each(text: &str, find: &str, with: &str, values: &Values) -> String {
 
 /// Runs a template's steps for a new project and returns its "what next" note. On failure
 /// the caller removes the folder.
-pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source: Source, url: &str) -> Result<Option<String>> {
+pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source: Source, url: &str) -> Result<Built> {
     let dir = ctx.dir();
     let php_version = match template.uses_php() {
         true => Some(req.php.clone().or_else(|| ctx.settings.versions.php.clone()).ok_or_else(|| Error::msg("Install PHP first (Services → PHP)."))?),
         false => None,
     };
-    let values = values(ctx, req, template, url, php_version.as_deref());
+    // Node: the chosen NVM version (or NVM's default) for every step that runs npm, node...
+    // Steps that need Node in other templates (Laravel's npm build) use NVM's default.
+    let wants_node = template.uses_node() || template.steps.iter().any(|s| s.needs.iter().any(|n| n == "node"));
+    let node = match wants_node {
+        true => match crate::node::for_project(req.node.as_deref(), &dir) {
+            Ok(found) => Some(found),
+            Err(e) if template.uses_node() => return Err(e),
+            Err(_) => None,
+        },
+        false => None,
+    };
+    let node_bin: Option<PathBuf> = node.as_ref().map(|(_, bin)| bin.clone());
+    let pm_commands = match (&node_bin, template.uses_node()) {
+        (Some(bin), true) => {
+            let path = crate::apps::node_path(bin, ctx.layout);
+            Some(crate::apps::pm_commands(req.package_manager.unwrap_or_default(), &path)?)
+        }
+        _ => None,
+    };
+    let values = values(
+        ctx,
+        req,
+        template,
+        url,
+        php_version.as_deref(),
+        node.as_ref().zip(pm_commands.as_ref()).map(|((v, _), pm)| (v.as_str(), pm)),
+    );
     for v in template.variables.iter().filter(|v| v.required) {
         let shown = v.when.as_deref().is_none_or(|w| values.holds(w).unwrap_or(true));
         if shown && values.get(&format!("vars.{}", v.id)).trim().is_empty() {
@@ -494,7 +557,7 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
         }
     }
 
-    // A template that didn't ship with lampRabit runs risky commands only once approved.
+    // A template that didn't ship with LampRabit runs risky commands only once approved.
     if source == Source::User && !req.approve_risky {
         let risky: Vec<String> = template
             .risks()
@@ -507,19 +570,20 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
         }
     }
 
-    ctx.step("Checking requirements");
-    check_requirements(ctx, template, php_version.as_deref(), &steps).await?;
-
     let php = match &php_version {
         Some(v) => Some((php_cli(ctx, v)?, ctx.layout.bin("php", v))),
         None => None,
     };
+    // Steps find the project's Node and PHP first, then LampRabit's commands (composer, mysql…).
+    let path: Vec<PathBuf> = node_bin.iter().cloned().chain(php.iter().map(|(_, bin)| bin.clone())).chain([shims::dir(ctx.layout)]).collect();
+    let path_os = std::env::join_paths(path.iter().cloned().chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).unwrap_or_default();
+
+    ctx.step("Checking requirements");
+    check_requirements(ctx, template, php_version.as_deref(), &steps, &path_os).await?;
     let composer = match steps.iter().any(|&i| matches!(template.steps[i].action, Action::Composer(_))) {
         true => Some(ensure_composer(ctx).await?),
         false => None,
     };
-    // Shell steps find the project's PHP first, then lampRabit's commands (composer, mysql…).
-    let path: Vec<PathBuf> = php.iter().map(|(_, bin)| bin.clone()).chain([shims::dir(ctx.layout)]).collect();
 
     for &i in &steps {
         let step = &template.steps[i];
@@ -620,7 +684,17 @@ pub async fn build(ctx: &Ctx<'_>, req: &NewProject, template: &Template, source:
             }
         }
     }
-    Ok(template.done.as_deref().map(|d| values.render(d)))
+    let app = template.serve.as_ref().map(|a| crate::config::NodeApp {
+        mode: if a.file.trim().is_empty() { crate::config::AppMode::Command } else { crate::config::AppMode::File },
+        command: values.render(&a.command),
+        file: values.render(&a.file),
+        watch: a.watch,
+        port: 0,
+        node: req.node.clone(),
+        package_manager: req.package_manager,
+        serve: a.mode == crate::config::ServeMode::Dynamic,
+    });
+    Ok(Built { note: template.done.as_deref().map(|d| values.render(d)), app })
 }
 
 #[cfg(test)]

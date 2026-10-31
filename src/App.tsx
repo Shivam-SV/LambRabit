@@ -44,6 +44,11 @@ function useBackendEvents() {
       }),
       listen("service-health", () => queryClient.invalidateQueries({ queryKey: ["services"] })),
       listen("tunnels-changed", () => queryClient.invalidateQueries({ queryKey: ["tunnels"] })),
+      // A project's dev server came up or went away: its domain moved.
+      listen<string[]>("routes-changed", ({ payload }) => {
+        queryClient.invalidateQueries({ queryKey: ["sites"] });
+        for (const note of payload) notify("info", note);
+      }),
       listen<RawLogLine>("log-line", ({ payload }) => pushLog(payload)),
       listen<InstallProgress>("install-progress", ({ payload }) => {
         setInstall(payload);
@@ -89,6 +94,7 @@ function useGlobalShortcuts() {
     ...Object.fromEntries(pageKeys.map((p, i) => [String(i + 1), () => navigate(p)])),
     "shift+s": () => stack.startStack(),
     "shift+x": () => stack.stopAll(),
+    "shift+r": () => stack.running.length > 0 && stack.restartRunning(),
     n: () => setNewProjectOpen(true),
     t: () => api.openTerminal(null).catch(onError),
     w: () =>
@@ -116,8 +122,8 @@ export default function App() {
         <main
           key={page}
           className={clsx(
-            "motion-page mx-auto px-6 pt-8 pb-32 sm:px-10",
-            page === "overview" ? "max-w-[90rem]" : page === "logs" ? "h-full min-h-0 max-w-6xl overflow-hidden pt-4 pb-24" : "max-w-6xl",
+            "motion-page mx-auto px-6 pt-8 pb-26 sm:px-10",
+            page === "overview" ? "max-w-[90rem]" : page === "logs" ? "h-full min-h-0 max-w-7xl overflow-hidden pt-4 pb-20" : "max-w-7xl",
           )}
         >
           {page === "overview" && <Overview />}

@@ -24,7 +24,7 @@ variables:
     label: Adobe private key
     if: vars.source == adobe
     required: true
-    help: Saved in lampRabit's Composer settings, so later composer updates work too.
+    help: Saved in LampRabit's Composer settings, so later composer updates work too.
   - id: search
     label: Search engine
     type: choice
@@ -120,4 +120,15 @@ steps:
     needs: [git]
     git_init:
       commit: New Magento project
+commands:
+  discover: [magento, composer.json]
+  list:
+    - name: Flush the caches
+      run: php -d memory_limit=-1 bin/magento cache:flush
+    - name: Reindex everything
+      run: php -d memory_limit=-1 bin/magento indexer:reindex
+    - name: Upgrade after installing a module
+      run: php -d memory_limit=-1 bin/magento setup:upgrade
+    - name: Compile dependency injection
+      run: php -d memory_limit=-1 bin/magento setup:di:compile
 done: "Shop at {{url}}, admin at {{url}}/admin ({{vars.admin_user}} / {{vars.admin_password}}). Magento serves from pub/ and needs Apache's .htaccess rules, so keep this site on Apache."

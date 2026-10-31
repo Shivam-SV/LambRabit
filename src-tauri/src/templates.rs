@@ -28,6 +28,12 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("drupal.yaml", include_str!("../templates/drupal.yaml")),
     ("magento.yaml", include_str!("../templates/magento.yaml")),
     ("statamic.yaml", include_str!("../templates/statamic.yaml")),
+    ("vite.yaml", include_str!("../templates/vite.yaml")),
+    ("nextjs.yaml", include_str!("../templates/nextjs.yaml")),
+    ("nuxt.yaml", include_str!("../templates/nuxt.yaml")),
+    ("astro.yaml", include_str!("../templates/astro.yaml")),
+    ("express.yaml", include_str!("../templates/express.yaml")),
+    ("nestjs.yaml", include_str!("../templates/nestjs.yaml")),
     ("static.yaml", include_str!("../templates/static.yaml")),
 ];
 
@@ -59,6 +65,34 @@ pub struct Template {
     /// Shown when the project is ready (what to do next).
     #[serde(default)]
     pub done: Option<String>,
+    /// How the project's domain is served: a dev server LampRabit runs (dynamic) or the
+    /// files themselves (static). Without it, the web server serves the files (PHP).
+    #[serde(default, alias = "app")]
+    pub serve: Option<ServeTemplate>,
+    /// What the project's Commands panel offers.
+    #[serde(default)]
+    pub commands: Option<CommandsTemplate>,
+}
+
+/// A template's commands: where to discover them, and fixed ones of its own.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandsTemplate {
+    /// Sources to list commands from; every source the project's files show when absent.
+    #[serde(default)]
+    pub discover: Option<Vec<crate::commands::Source>>,
+    #[serde(default)]
+    pub list: Vec<TemplateCommand>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateCommand {
+    pub name: String,
+    /// Runs in the project folder; placeholders work.
+    pub run: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 fn one() -> u32 {
@@ -73,6 +107,27 @@ pub struct Requires {
     /// PHP extensions that must be loaded (checked with `php -m`).
     #[serde(default)]
     pub extensions: Vec<String>,
+    /// A Node.js project: the wizard asks for the Node version and package manager.
+    #[serde(default)]
+    pub node: bool,
+}
+
+/// How a Node project runs once created; saved as its app setup (Sites → Node app).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServeTemplate {
+    #[serde(default)]
+    pub mode: crate::config::ServeMode,
+    /// What starts the dev server; placeholders work, and `{port}` is filled in with the
+    /// port LampRabit picks when it starts.
+    #[serde(default)]
+    pub command: String,
+    /// Instead of a command: a script for `node` to run.
+    #[serde(default)]
+    pub file: String,
+    /// With `file`: restart when files change (`node --watch`).
+    #[serde(default)]
+    pub watch: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,9 +151,21 @@ pub struct Variable {
     pub help: Option<String>,
     #[serde(rename = "type", default)]
     pub kind: VariableKind,
-    /// For `choice`.
+    /// For `choice` and `multi`: plain values, or `{value, label, if}`.
     #[serde(default)]
-    pub options: Vec<String>,
+    pub options: Vec<VariableOption>,
+    /// `bool`: what a yes or a no puts in the steps (`--eslint` / `--no-eslint`);
+    /// "true" and "false" when absent.
+    #[serde(default)]
+    pub on: Option<String>,
+    #[serde(default)]
+    pub off: Option<String>,
+    /// Wraps a non-empty value, e.g. `--add {value}`; an empty one renders as nothing.
+    #[serde(default)]
+    pub flag: Option<String>,
+    /// `multi`: what joins the picked values (default ",").
+    #[serde(default)]
+    pub separator: Option<String>,
     #[serde(default)]
     pub default: Option<String>,
     /// Shown (and used) only when this holds, like a step's `if:`.
@@ -116,6 +183,64 @@ pub enum VariableKind {
     Text,
     Choice,
     Bool,
+    /// Several of the options (checkboxes).
+    Multi,
+}
+
+/// An option of a choice: written as a plain value, or with a label and a condition (shown
+/// only while it holds, so options can follow earlier answers).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableOption {
+    pub value: String,
+    pub label: String,
+    pub when: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for VariableOption {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Full {
+            value: String,
+            label: Option<String>,
+            #[serde(rename = "if")]
+            when: Option<String>,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Form {
+            Plain(String),
+            Full(Full),
+        }
+        Ok(match Form::deserialize(d)? {
+            Form::Plain(value) => VariableOption { label: value.clone(), value, when: None },
+            Form::Full(f) => VariableOption { label: f.label.unwrap_or_else(|| f.value.clone()), value: f.value, when: f.when },
+        })
+    }
+}
+
+impl Variable {
+    /// What `{{vars.<id>}}` renders from the value picked in the wizard.
+    pub fn render(&self, raw: &str) -> String {
+        let value = match self.kind {
+            VariableKind::Bool => {
+                let on = raw == "true";
+                match (on, &self.on, &self.off) {
+                    (true, Some(v), _) | (false, _, Some(v)) => v.clone(),
+                    (true, None, _) => "true".into(),
+                    (false, _, None) => "false".into(),
+                }
+            }
+            VariableKind::Multi => raw.split(',').map(str::trim).filter(|v| !v.is_empty()).collect::<Vec<_>>().join(self.separator.as_deref().unwrap_or(",")),
+            _ => raw.to_string(),
+        };
+        match &self.flag {
+            Some(flag) if !value.is_empty() => flag.replace("{value}", &value),
+            Some(_) => String::new(),
+            None => value,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -324,6 +449,14 @@ pub const PLACEHOLDERS: &[&str] = &[
     "db.server_version",
     "mail.host",
     "mail.port",
+    "node_version",
+    "pm",
+    "pm.run",
+    "pm.args",
+    "pm.exec",
+    "pm.create",
+    "pm.install",
+    "pm.add",
 ];
 
 impl Template {
@@ -331,17 +464,43 @@ impl Template {
         self.requires.php.is_some()
     }
 
+    pub fn uses_node(&self) -> bool {
+        self.requires.node
+    }
+
     /// Catches mistakes when the template loads rather than halfway through a project:
     /// the schema, ids, duplicate step ids and unknown placeholders.
     fn check(&self) -> Result<()> {
         if self.schema != SCHEMA {
-            return Err(Error::msg(format!("schema {} isn't supported (this lampRabit reads schema {SCHEMA})", self.schema)));
+            return Err(Error::msg(format!("schema {} isn't supported (this LampRabit reads schema {SCHEMA})", self.schema)));
         }
         if self.id.is_empty() || !self.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             return Err(Error::msg("id must use letters, numbers, dashes and underscores"));
         }
         if self.steps.is_empty() {
             return Err(Error::msg("has no steps"));
+        }
+        for c in self.commands.iter().flat_map(|c| &c.list) {
+            for name in placeholders(&c.run) {
+                if !PLACEHOLDERS.contains(&name.as_str()) {
+                    return Err(Error::msg(format!("command \"{}\": unknown placeholder {{{{{name}}}}}", c.name)));
+                }
+            }
+        }
+        if let Some(serve) = &self.serve {
+            if serve.mode == crate::config::ServeMode::Dynamic {
+                if !self.requires.node {
+                    return Err(Error::msg("serve: dynamic needs requires: node: true"));
+                }
+                if serve.command.trim().is_empty() && serve.file.trim().is_empty() {
+                    return Err(Error::msg("serve: dynamic needs a command or a file"));
+                }
+            }
+            for name in placeholders(&serve.command).into_iter().chain(placeholders(&serve.file)) {
+                if !PLACEHOLDERS.contains(&name.as_str()) && !name.starts_with("vars.") {
+                    return Err(Error::msg(format!("serve: unknown placeholder {{{{{name}}}}}")));
+                }
+            }
         }
         let mut ids = std::collections::BTreeSet::new();
         for (i, step) in self.steps.iter().enumerate() {
@@ -368,8 +527,13 @@ impl Template {
             }
         }
         for v in &self.variables {
-            if v.kind == VariableKind::Choice && v.options.is_empty() {
-                return Err(Error::msg(format!("variable {} is a choice without options", v.id)));
+            if matches!(v.kind, VariableKind::Choice | VariableKind::Multi) && v.options.is_empty() {
+                return Err(Error::msg(format!("variable {} has no options", v.id)));
+            }
+            for o in &v.options {
+                if let Some(when) = &o.when {
+                    parse_condition(when).map_err(|e| Error::msg(format!("variable {}, option {}: {e}", v.id, o.value)))?;
+                }
             }
             if let Some(when) = &v.when {
                 parse_condition(when).map_err(|e| Error::msg(format!("variable {}: {e}", v.id)))?;
@@ -379,7 +543,7 @@ impl Template {
     }
 
     /// Risky things a template does, each with why; asked about before running a template
-    /// that didn't ship with lampRabit.
+    /// that didn't ship with LampRabit.
     pub fn risks(&self) -> Vec<Risk> {
         self.steps
             .iter()
@@ -517,9 +681,12 @@ impl Values {
 
     pub fn holds(&self, condition: &str) -> Result<bool> {
         let truthy = |v: &str| !v.is_empty() && v != "false" && v != "none";
+        // Variables keep the value picked in the wizard under "raw.", for conditions; the
+        // plain name has what steps render (a flag, say).
+        let picked = |name: &str| self.0.get(&format!("raw.{name}")).cloned().unwrap_or_else(|| self.get(name));
         Ok(match parse_condition(condition)? {
-            Condition::Truthy(name, want) => truthy(&self.get(&name)) == want,
-            Condition::Compare(name, value, equal) => (self.get(&name) == value) == equal,
+            Condition::Truthy(name, want) => truthy(&picked(&name)) == want,
+            Condition::Compare(name, value, equal) => (picked(&name) == value) == equal,
         })
     }
 
@@ -564,6 +731,7 @@ pub struct TemplateInfo {
     /// Where a user template's file is.
     pub path: Option<PathBuf>,
     pub uses_php: bool,
+    pub uses_node: bool,
     pub min_php: Option<String>,
     pub extensions: Vec<String>,
     pub database: DatabaseUse,
@@ -664,6 +832,7 @@ pub fn catalog(layout: &Layout) -> Catalog {
             source,
             path,
             uses_php: t.uses_php(),
+            uses_node: t.uses_node(),
             min_php: t.requires.php.clone().filter(|v| v != "any"),
             extensions: t.requires.extensions.clone(),
             database: t.database,
@@ -674,7 +843,7 @@ pub fn catalog(layout: &Layout) -> Catalog {
     Catalog { templates, broken, folder: folder(layout) }
 }
 
-/// The template with this id, and whether it shipped with lampRabit.
+/// The template with this id, and whether it shipped with LampRabit.
 pub fn find(layout: &Layout, id: &str) -> Result<(Template, Source)> {
     load(layout)
         .0
@@ -712,6 +881,35 @@ mod tests {
         let t = parse(EXAMPLE).unwrap();
         assert_eq!(t.variables.len(), 1);
         assert!(t.risks().is_empty(), "the example shouldn't ask for approval: {:?}", t.risks());
+    }
+
+    #[test]
+    fn variables_render_flags_and_lists() {
+        let t = parse(r#"schema: 1
+id: t
+name: T
+variables:
+  - { id: lint, label: Lint, type: bool, on: --eslint, off: --no-eslint }
+  - { id: add, label: Add, type: multi, options: [react, mdx], flag: "--add {value}" }
+  - id: router
+    label: Router
+    type: choice
+    options:
+      - { value: --app, label: App Router }
+      - { value: --no-app, label: Pages Router, if: vars.lint == true }
+steps:
+  - run: x {{vars.lint}} {{vars.add}} {{vars.router}}
+"#)
+        .unwrap();
+        let [lint, add, router] = [&t.variables[0], &t.variables[1], &t.variables[2]];
+        assert_eq!(lint.render("true"), "--eslint");
+        assert_eq!(lint.render("false"), "--no-eslint");
+        assert_eq!(add.render("react,mdx"), "--add react,mdx");
+        assert_eq!(add.render(""), "");
+        assert_eq!(router.options[1].label, "Pages Router");
+        assert_eq!(router.options[0].when, None);
+        let values = Values(BTreeMap::from([("vars.lint".into(), "--eslint".into()), ("raw.vars.lint".into(), "true".into())]));
+        assert!(values.holds("vars.lint == true").unwrap(), "conditions see the picked value");
     }
 
     #[test]

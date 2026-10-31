@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "lampRabit",
+  "productName": "LampRabit",
   "version": "0.1.2",
   "identifier": "dev.lamprabit.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "lampRabit",
+        "title": "LampRabit",
         "width": 1280,
         "height": 860,
         "minWidth": 900,
@@ -44,17 +44,21 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
-    "publisher": "lampRabit",
+    "publisher": "LampRabit",
     "category": "DeveloperTool",
     "shortDescription": "Local PHP development environment: Apache or Nginx, PHP and MariaDB with automatic .test sites",
-    "longDescription": "lampRabit runs a complete local PHP stack: Apache or Nginx, several PHP versions side by side, MariaDB, Redis, Mailpit and database tools. Every folder in www becomes https://<folder>.test with a trusted local certificate.",
-    "copyright": "© 2026 lampRabit contributors",
+    "longDescription": "LampRabit runs a complete local PHP stack: Apache or Nginx, several PHP versions side by side, MariaDB, Redis, Mailpit and database tools. Every folder in www becomes https://<folder>.test with a trusted local certificate.",
+    "copyright": "© 2026 LampRabit contributors",
     "homepage": "https://github.com/Shivam-SV/LampRabit",
     "windows": {
       "nsis": {
         "installMode": "currentUser",
         "displayLanguageSelector": false,
         "installerHooks": "windows/hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": ["windows/cleanup.wxs"],
+        "componentRefs": ["LampRabitCleanup"]
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

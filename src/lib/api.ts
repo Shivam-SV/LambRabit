@@ -157,6 +157,19 @@ export interface Site {
   /** Set for built-in tools rather than www/ folders. */
   tool: "adminer" | "phpmyadmin" | "phpredisadmin" | "mailpit" | null;
   proxy: string | null;
+  /** How the project's process runs, once set up (or started once). */
+  app: NodeApp | null;
+  /** Has a package.json, so it has scripts and can run a dev server. */
+  nodeProject: boolean;
+  language: Language;
+  /** dynamic: the domain forwards to the project's dev server; static: the web server serves the files. */
+  serveMode: ServeMode;
+  /** Where the domain goes right now: a port the project listens on, or null for its files. */
+  route: Route | null;
+  /** Every port the project's processes listen on, whoever started them. */
+  ports: DetectedPort[];
+  /** The port picked for the domain when there are several; null chooses automatically. */
+  routePort: number | null;
   /** PHP version chosen for the site; null follows the active version. */
   php: string | null;
   server: Server;
@@ -196,16 +209,22 @@ export interface NewProject {
   variables: Record<string, string>;
   /** Optional steps by id: run or not. */
   optional: Record<string, boolean>;
-  /** The user accepted the risky steps of a template that didn't ship with lampRabit. */
+  /** The user accepted the risky steps of a template that didn't ship with LampRabit. */
   approveRisky: boolean;
+  /** Node templates. */
+  node: string | null;
+  packageManager: PackageManager | null;
 }
 
 export interface TemplateVariable {
   id: string;
   label: string;
   help: string | null;
-  type: "text" | "choice" | "bool";
-  options: string[];
+  type: "text" | "choice" | "bool" | "multi";
+  /** Options shown only while their `when` holds. */
+  options: { value: string; label: string; when: string | null }[];
+  /** multi: joins the picked values (the wizard stores them comma-separated). */
+  separator: string | null;
   default: string | null;
   /** Shown only while this condition holds (same syntax as a step's if:). */
   when: string | null;
@@ -223,6 +242,7 @@ export interface ProjectTemplate {
   source: "builtin" | "user";
   path: string | null;
   usesPhp: boolean;
+  usesNode: boolean;
   minPhp: string | null;
   extensions: string[];
   database: "none" | "optional" | "required";
@@ -279,14 +299,118 @@ export interface StatusEvent {
   message: string | null;
 }
 
-export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system";
+export type LogService = "apache" | "nginx" | "php" | "mariadb" | "mysql" | "mailpit" | "redis" | "memcached" | "system" | "project";
 
 /** A raw log line from a service's output or one of its log files. */
 export interface RawLogLine {
   id: number;
   service: LogService;
-  stream: "output" | "error" | "access";
+  /** "command" is what LampRabit ran for a project, and how it ended. */
+  stream: LogStream;
   line: string;
+  /** For service "project": which project. */
+  project?: string;
+}
+
+export type LogStream = "output" | "error" | "access" | "command";
+
+/** What a project is written in; decides its runtime and how it's served. */
+export type Language = "php" | "node" | "static";
+export type ServeMode = "dynamic" | "static";
+export interface Route {
+  port: number;
+  /** 127.0.0.1, or [::1] for servers listening on IPv6 only. */
+  host: string;
+}
+
+export interface DetectedPort extends Route {
+  pid: number;
+  /** node, php… */
+  process: string;
+  command: string;
+}
+
+export type AppMode = "command" | "file";
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+/** How a Node project runs (Sites → Node app). */
+export interface NodeApp {
+  mode: AppMode;
+  /** Command mode; `{port}` is filled in when it starts. */
+  command: string;
+  file: string;
+  watch: boolean;
+  port: number;
+  node: string | null;
+  packageManager: PackageManager | null;
+  /** https://<project>.test forwards to the app. */
+  serve: boolean;
+}
+
+export interface AppStatus {
+  name: string;
+  state: "stopped" | "starting" | "running" | "crashed";
+  pid: number | null;
+  port: number | null;
+  since: number | null;
+  node: string | null;
+  exitCode: number | null;
+  /** A command running for the project. */
+  task: string | null;
+}
+
+export interface AppInfo {
+  config: NodeApp;
+  configured: boolean;
+  scripts: Record<string, string>;
+  detectedPackageManager: PackageManager;
+  nodeVersions: string[];
+  projectNode: string | null;
+  framework: string | null;
+  status: AppStatus;
+}
+
+export interface AppOutput {
+  name: string;
+  line: string;
+  stream: LogStream;
+}
+
+export interface ProjectCommand {
+  group: string;
+  name: string;
+  command: string;
+  description: string | null;
+  origin: "yours" | "template" | "discovered";
+}
+
+export interface ProjectCommands {
+  commands: ProjectCommand[];
+  problems: string[];
+  sources: string[];
+}
+
+/** What the Overview shows about a project beyond the site list (project_facts). */
+export interface ProjectFacts {
+  package: string | null;
+  description: string | null;
+  version: string | null;
+  /** Installed framework version, or the declared range when not installed. */
+  frameworkVersion: string | null;
+  phpRequirement: string | null;
+  nodeRequirement: string | null;
+  dependencies: { manager: string; count: number; devCount: number; installed: boolean }[];
+  envFile: string | null;
+  /** [key, value] pairs; secrets are never included. */
+  env: [string, string][];
+  git: { remote: string | null; commit: [string, string, number] | null; changes: number | null } | null;
+  /** Name of the template it was created from. */
+  template: string | null;
+}
+
+export interface UserCommand {
+  name: string;
+  run: string;
 }
 
 export interface Settings {
@@ -340,7 +464,7 @@ export interface Usage {
   processes: number;
 }
 
-/** Removing lampRabit: folders deleted and kept (Settings → Troubleshooting). */
+/** Removing LampRabit: folders deleted and kept (Settings → Troubleshooting). */
 export interface UninstallPlan {
   remove: string[];
   keep: string[];
@@ -377,6 +501,21 @@ export const api = {
   phpStatus: () => invoke<PoolStatus[]>("php_status"),
   createProject: (request: NewProject) => invoke<{ url: string; note: string | null }>("create_project", { request }),
   listTemplates: () => invoke<TemplateCatalog>("list_templates"),
+  appInfo: (name: string) => invoke<AppInfo>("app_info", { name }),
+  appSave: (name: string, config: NodeApp) => invoke<void>("app_save", { name, config }),
+  appStart: (name: string) => invoke<AppStatus>("app_start", { name }),
+  appStop: (name: string) => invoke<void>("app_stop", { name }),
+  appRestart: (name: string) => invoke<AppStatus>("app_restart", { name }),
+  appInstall: (name: string) => invoke<void>("app_install", { name }),
+  appStatuses: () => invoke<AppStatus[]>("app_statuses"),
+  appLogs: (name: string) => invoke<string[]>("app_logs", { name }),
+  appFreePort: () => invoke<number>("app_free_port"),
+  projectCommands: (name: string) => invoke<ProjectCommands>("project_commands", { name }),
+  projectFacts: (name: string) => invoke<ProjectFacts>("project_facts", { name }),
+  setSiteRoute: (name: string, port: number | null) => invoke<void>("set_site_route", { name, port }),
+  runProjectCommand: (name: string, label: string, command: string) => invoke<void>("run_project_command", { name, label, command }),
+  stopProjectCommand: (name: string) => invoke<void>("stop_project_command", { name }),
+  saveProjectCommands: (name: string, commands: UserCommand[]) => invoke<void>("save_project_commands", { name, commands }),
   openTemplatesFolder: () => invoke<void>("open_templates_folder"),
   tunnelStart: (provider: TunnelProvider, site: string | null, port: number | null) =>
     invoke<Tunnel>("tunnel_start", { provider, site, port }),

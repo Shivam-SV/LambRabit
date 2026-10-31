@@ -34,6 +34,9 @@ pub struct LogLine {
     pub service: &'static str,
     pub stream: &'static str,
     pub line: String,
+    /// For service "project": which project (its Node app and the commands run for it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 #[derive(Default)]
@@ -54,13 +57,16 @@ pub enum Level {
     Error,
 }
 
-/// Records something lampRabit did (service lifecycle, installs, sites, ...)
+/// Records something LampRabit did (service lifecycle, installs, sites, ...)
 /// in the System log stream and in `logs/lampRabit.log`.
-pub fn system(app: &AppHandle, level: Level, message: impl Into<String>) {
+/// Local time as log files write it: `2026-10-31 12:00:00`.
+pub fn stamp() -> String {
     let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
-    let stamp = now
-        .format(time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"))
-        .unwrap_or_default();
+    now.format(time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]")).unwrap_or_default()
+}
+
+pub fn system(app: &AppHandle, level: Level, message: impl Into<String>) {
+    let stamp = stamp();
     let level = match level {
         Level::Info => "info",
         Level::Warn => "warn",
@@ -84,7 +90,7 @@ pub fn push(app: &AppHandle, service: &'static str, stream: &'static str, line: 
         let mut guard = hub.inner.lock().unwrap();
         let (seq, lines) = &mut *guard;
         *seq += 1;
-        let entry = LogLine { id: *seq, service, stream, line };
+        let entry = LogLine { id: *seq, service, stream, line, project: None };
         lines.push_back(entry.clone());
         if lines.len() > KEEP {
             lines.pop_front();
@@ -94,7 +100,31 @@ pub fn push(app: &AppHandle, service: &'static str, stream: &'static str, line: 
     let _ = app.emit("log-line", entry);
 }
 
-/// Files written by lampRabit itself: the system log and captured service console output.
+/// A line of a project's output (its Node app or a command run for it), for the Logs page.
+/// `stream` is "output", "error" or "command" (the command line itself).
+pub fn push_project(app: &AppHandle, project: &str, stream: &'static str, line: String) {
+    let hub = app.state::<LogHub>();
+    let entry = {
+        let mut guard = hub.inner.lock().unwrap();
+        let (seq, lines) = &mut *guard;
+        *seq += 1;
+        let entry = LogLine { id: *seq, service: "project", stream, line, project: Some(project.to_string()) };
+        lines.push_back(entry.clone());
+        if lines.len() > KEEP {
+            lines.pop_front();
+        }
+        entry
+    };
+    let _ = app.emit("log-line", entry);
+}
+
+/// Projects' log files (logs/apps/<project>.log), written by apps.rs. Each line starts with
+/// its time and stream: `[2026-10-31 12:00:00] error: …`.
+pub fn project_dir(dir: &Path) -> PathBuf {
+    dir.join("apps")
+}
+
+/// Files written by LampRabit itself: the system log and captured service console output.
 const OWN_FILES: [(&str, &str, &str); 5] = [
     ("lampRabit.log", "system", "output"),
     ("apache-output.log", "apache", "output"),
@@ -129,8 +159,25 @@ pub fn history(app: &AppHandle, dir: &Path) -> History {
         lines.extend(
             iter.map(|l| l.trim_end_matches('\r'))
                 .filter(|l| !l.is_empty())
-                .map(|l| LogLine { id: 0, service, stream, line: l.to_string() }),
+                .map(|l| LogLine { id: 0, service, stream, line: l.to_string(), project: None }),
         );
+    }
+    // Projects' output, one file each.
+    for entry in std::fs::read_dir(project_dir(dir)).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Some(project) = path.file_stem().and_then(|n| n.to_str()).filter(|_| path.extension().is_some_and(|e| e == "log")) else { continue };
+        let Ok(len) = std::fs::metadata(&path).map(|m| m.len()) else { continue };
+        let from = len.saturating_sub(HISTORY_BYTES);
+        let Ok(bytes) = read_range(&path, from, len - from) else { continue };
+        let text = String::from_utf8_lossy(&bytes);
+        let mut iter = text.split('\n');
+        if from > 0 {
+            iter.next();
+        }
+        for l in iter.map(|l| l.trim_end_matches('\r')).filter(|l| !l.is_empty()) {
+            let stream = if l.contains("] error: ") { "error" } else if l.contains("] command: ") { "command" } else { "output" };
+            lines.push(LogLine { id: 0, service: "project", stream, line: l.to_string(), project: Some(project.to_string()) });
+        }
     }
     History { lines, cursor }
 }
@@ -146,6 +193,11 @@ pub fn clear(app: &AppHandle, dir: &Path) -> Vec<String> {
         }
         if std::fs::OpenOptions::new().write(true).open(&path).and_then(|f| f.set_len(0)).is_err() {
             failed.push(file.to_string());
+        }
+    }
+    for entry in std::fs::read_dir(project_dir(dir)).into_iter().flatten().flatten() {
+        if std::fs::OpenOptions::new().write(true).open(entry.path()).and_then(|f| f.set_len(0)).is_err() {
+            failed.push(format!("apps/{}", entry.file_name().to_string_lossy()));
         }
     }
     failed

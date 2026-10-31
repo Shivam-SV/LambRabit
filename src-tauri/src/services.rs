@@ -436,9 +436,9 @@ pub async fn sync_hosts(app: &AppHandle, settings: &Settings, layout: &Layout, s
     }
 }
 
-/// Server processes left running from lampRabit's bin/ folder by a previous run that
+/// Server processes left running from LampRabit's bin/ folder by a previous run that
 /// ended without shutting them down (a crash, or the app being killed). They hold ports
-/// and files, so they're stopped when lampRabit starts. Only one lampRabit runs at a time,
+/// and files, so they're stopped when LampRabit starts. Only one LampRabit runs at a time,
 /// so none of them can belong to another copy. CLI tools (`php`, `mysql`…) that the user
 /// may be running from a terminal are left alone. Returns what was stopped.
 pub fn reap_orphans(layout: &Layout) -> Vec<String> {
@@ -491,7 +491,7 @@ async fn allow_low_ports(app: &AppHandle, label: &str, ports: &[u16]) -> Result<
     }
     logs::system(app, Level::Info, format!("Asking for administrator rights to let {label} use port {lowest}"));
     let script = format!(
-        "printf '# Lets lampRabit serve sites on standard ports without root.\nnet.ipv4.ip_unprivileged_port_start = {lowest}\n' > /etc/sysctl.d/50-lamprabit.conf && sysctl -q -w net.ipv4.ip_unprivileged_port_start={lowest}"
+        "printf '# Lets LampRabit serve sites on standard ports without root.\nnet.ipv4.ip_unprivileged_port_start = {lowest}\n' > /etc/sysctl.d/50-lamprabit.conf && sysctl -q -w net.ipv4.ip_unprivileged_port_start={lowest}"
     );
     let allowed = Command::new("pkexec").args(["sh", "-c", &script]).status().await.is_ok_and(|s| s.success());
     if allowed {
@@ -565,7 +565,7 @@ impl Supervisor {
         self.problems.lock().unwrap().insert(kind, problem);
     }
 
-    /// PIDs of everything lampRabit runs, to recognise its own ports.
+    /// PIDs of everything LampRabit runs, to recognise its own ports.
     pub async fn pids(&self) -> HashMap<u32, ServiceKind> {
         self.running.lock().await.iter().filter_map(|(k, h)| Some((h.pid?, *k))).collect()
     }
@@ -732,7 +732,7 @@ impl Supervisor {
                     Problem::new(
                         format!("{} configuration error", kind.label()),
                         line.clone(),
-                        &["If the error points into etc/apache/sites/, fix or remove that file. lampRabit's own config files are regenerated on every start."],
+                        &["If the error points into etc/apache/sites/, fix or remove that file. LampRabit's own config files are regenerated on every start."],
                     ),
                 );
                 return Err(Error::msg(format!("{} configuration test failed: {line}", kind.label())));
@@ -885,6 +885,57 @@ impl Supervisor {
                 logs::system(app, Level::Info, format!("Stopping {}", kind.label()));
             }
         }
+    }
+
+    /// Applies changed sites to a running web server without dropping its connections:
+    /// Nginx re-reads its config (`-s reload`, every OS) and Apache on Linux and macOS
+    /// restarts gracefully (SIGUSR1). The PHP pools are matched to the sites first, and the
+    /// new config is tested before the server sees it, since Apache exits on a graceful
+    /// restart with a broken config. Returns false when the server has to be restarted
+    /// instead: Apache on Windows has no graceful restart as a console process.
+    pub async fn reload(&self, app: &AppHandle, kind: ServiceKind, settings: &Settings, layout: &Layout) -> Result<bool> {
+        let Some(server) = kind.web_server() else { return Ok(false) };
+        let pid = match self.running.lock().await.get(&kind) {
+            Some(h) if h.state == ServiceState::Running => h.pid,
+            _ => return Ok(true),
+        };
+        if cfg!(windows) && kind == ServiceKind::Apache {
+            return Ok(false);
+        }
+        let sites = sites::served(settings, layout);
+        let plan = php::plan(settings, layout, &sites);
+        self.php.ensure(app, settings, layout, &plan).await?;
+        sites::write_config(settings, layout, &sites, &plan, server)?;
+        if kind == ServiceKind::Apache {
+            configs::write_apache(settings, layout, &plan)?;
+        }
+        let spec = launch_spec(kind, settings, layout)?;
+        if let Some(output) = server_config_test(&spec).await {
+            return Err(Error::msg(format!("{} kept its current sites because the new config has an error:\n{output}", kind.label())));
+        }
+        if kind == ServiceKind::Nginx {
+            let (program, mut args) = spec.stop_cmd.ok_or_else(|| Error::msg("Nginx has no control command"))?;
+            if let Some(last) = args.last_mut() {
+                *last = "reload".into();
+            }
+            let mut cmd = Command::new(program);
+            cmd.args(args).current_dir(&spec.cwd);
+            procgroup::prepare(&mut cmd);
+            let out = cmd.output().await?;
+            if !out.status.success() {
+                return Err(Error::msg(format!("Nginx didn't reload: {}", String::from_utf8_lossy(&out.stderr).trim())));
+            }
+        } else {
+            #[cfg(unix)]
+            if let Some(pid) = pid {
+                // SAFETY: signals the Apache parent process this supervisor started.
+                unsafe { libc::kill(pid as i32, libc::SIGUSR1) };
+            }
+            #[cfg(not(unix))]
+            let _ = pid;
+        }
+        logs::system(app, Level::Info, format!("{} reloaded its sites", kind.label()));
+        Ok(true)
     }
 
     /// Stops everything and waits (bounded) for the processes to exit.

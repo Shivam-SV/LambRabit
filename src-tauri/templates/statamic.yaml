@@ -26,4 +26,9 @@ steps:
     needs: [git]
     git_init:
       commit: New Statamic project
+commands:
+  discover: [please, artisan, composer.json]
+  list:
+    - name: Clear Statamic's caches
+      run: php please cache:clear
 done: "Create your first user with php please make:user in the project's terminal, then sign in at {{url}}/cp."

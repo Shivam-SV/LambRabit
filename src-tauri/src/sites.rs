@@ -10,12 +10,23 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    config::{Server, Settings},
+    config::{ServeMode, Server, Settings},
     error::{Error, Result},
     layout::Layout,
     php::{self, PoolPlan},
     ssl,
 };
+
+/// What a project is written in, which decides the runtime it gets (PHP version, Node
+/// version) and how it's served. New languages (Go, Python...) add a variant here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    Php,
+    Node,
+    /// HTML and assets only.
+    Static,
+}
 
 const HOSTS_BEGIN: &str = "# lampRabit begin (managed automatically, do not edit)";
 const HOSTS_END: &str = "# lampRabit end";
@@ -37,6 +48,24 @@ pub struct Site {
     pub tool: Option<&'static str>,
     /// Forward requests to this local URL instead of serving files.
     pub proxy: Option<String>,
+    /// Pass the browser's Host header on to `proxy` (tools); Node dev servers get their
+    /// own address instead, since Vite refuses hosts it doesn't know.
+    pub proxy_keep_host: bool,
+    /// How the project's process runs, once set up (or started once).
+    pub app: Option<crate::config::NodeApp>,
+    /// Has a package.json, so it has scripts and can run a dev server.
+    pub node_project: bool,
+    pub language: Language,
+    /// Dynamic: the project runs a dev server (Node projects that have one), so LampRabit
+    /// offers to start it. Static: the web server serves the files (PHP, HTML, a build folder).
+    pub serve_mode: ServeMode,
+    /// Where the domain goes right now: a port the project listens on (ports.rs), or None
+    /// for its files.
+    pub route: Option<crate::ports::Route>,
+    /// Every port the project's processes listen on, whoever started them.
+    pub ports: Vec<crate::ports::Detected>,
+    /// The port picked for the domain, when there are several.
+    pub route_port: Option<u16>,
     /// PHP version chosen for this site; None means the active version.
     pub php: Option<String>,
     pub server: Server,
@@ -116,6 +145,20 @@ fn project_info(dir: &Path) -> (Option<&'static str>, Option<String>, Option<Str
             .filter(|d| !d.is_empty() && !d.contains(':')),
     };
     (framework, git_branch, database)
+}
+
+/// A project's language from its files: PHP when it's a PHP project (even with a
+/// package.json for its assets), Node with a package.json, otherwise static files.
+pub fn language(dir: &Path) -> Language {
+    language_of(project_info(dir).0, dir)
+}
+
+fn language_of(framework: Option<&str>, dir: &Path) -> Language {
+    match framework {
+        Some(f) if f != "Static" => Language::Php,
+        _ if dir.join("package.json").exists() => Language::Node,
+        _ => Language::Static,
+    }
 }
 
 /// Folder name → DNS label: lowercase letters, digits and dashes. Common accented letters
@@ -210,7 +253,7 @@ fn site_url(settings: &Settings, server: Server, domain: &str, ssl: bool) -> Str
 }
 
 /// The server a site runs on: its own choice when both are enabled, otherwise the one that is.
-fn site_server(settings: &Settings, name: &str) -> Server {
+pub fn site_server(settings: &Settings, name: &str) -> Server {
     match settings.sites.get(name).and_then(|s| s.server) {
         Some(server) if settings.server_enabled(server) => server,
         _ => settings.primary_server(),
@@ -244,6 +287,14 @@ pub fn tools(settings: &Settings, layout: &Layout) -> Vec<Site> {
             modified: 0,
             tool: Some(id),
             proxy,
+            proxy_keep_host: true,
+            app: None,
+            node_project: false,
+            language: Language::Static,
+            serve_mode: ServeMode::Static,
+            route: None,
+            ports: Vec::new(),
+            route_port: None,
             php: None,
             server,
             node: None,
@@ -288,13 +339,36 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
             }
             let domain = format!("{}.{}", label(&name)?, settings.tld);
             let path = e.path();
-            let docroot = docroot(&path);
+            let mut docroot = docroot(&path);
             let own = settings.sites.get(&name);
             let ssl = own.and_then(|s| s.ssl).unwrap_or(settings.https_by_default);
             let php = own.and_then(|s| s.php.clone());
             let server = site_server(settings, &name);
             let node = crate::node::project_version(&path);
-            let (framework, git_branch, database) = project_info(&path);
+            let (mut framework, git_branch, database) = project_info(&path);
+            let node_project = path.join("package.json").exists();
+            let language = language_of(framework, &path);
+            if language == Language::Node {
+                framework = crate::apps::framework(&path);
+            }
+            let app = own.and_then(|s| s.app.clone());
+            // Dynamic is preferred: a Node project with a dev server (from its template or
+            // package.json) is served through it, unless it was switched to its files.
+            let serve_mode = if language == Language::Node && app.as_ref().map_or(crate::apps::runnable(&path), |a| a.serve) {
+                ServeMode::Dynamic
+            } else {
+                ServeMode::Static
+            };
+            // The domain follows what's listening: the dev server while it runs (whoever
+            // started it), the files otherwise.
+            let route = crate::ports::route_of(&name);
+            let ports = crate::ports::detected_of(&name);
+            let proxy = route.as_ref().map(|r| format!("http://{}:{}/", r.host, r.port));
+            // Served as files, a JavaScript project shows its build output, else its own
+            // index.html; public/ there holds assets, not a site.
+            if language == Language::Node && route.is_none() {
+                docroot = ["dist", "build", "out", "public"].iter().map(|d| path.join(d)).find(|d| d.join("index.html").is_file()).unwrap_or_else(|| path.clone());
+            }
             let modified = e
                 .metadata()
                 .and_then(|m| m.modified())
@@ -310,7 +384,17 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
                 ssl,
                 modified,
                 tool: None,
-                proxy: None,
+                proxy,
+                // PHP servers (artisan serve, php -S) accept any host and build links from it;
+                // Node dev servers get their own address, since Vite refuses hosts it doesn't know.
+                proxy_keep_host: language == Language::Php,
+                app,
+                node_project,
+                language,
+                serve_mode,
+                ports,
+                route_port: own.and_then(|s| s.route_port),
+                route,
                 php,
                 server,
                 node,
@@ -325,6 +409,30 @@ pub fn scan(settings: &Settings, layout: &Layout) -> Vec<Site> {
     let mut seen = BTreeSet::new();
     sites.retain(|s| seen.insert(s.domain.clone()));
     sites
+}
+
+/// What a project's domain shows while its dev server isn't running. It goes inside a
+/// quoted Apache string and a single-quoted Nginx one, so it has neither quote; the domain
+/// is a DNS name, so it's safe in both. It reloads itself until the app answers.
+fn stopped_page(domain: &str) -> String {
+    format!(
+        "<!doctype html><meta charset=utf-8><title>{domain} is not running</title>\
+         <body style=font-family:system-ui,sans-serif;max-width:36rem;margin:15vh auto;padding:0 1rem;color:#334155>\
+         <h1 style=font-size:1.4rem>{domain} is not running</h1>\
+         <p>Its dev server just stopped. LampRabit switches the domain to the project files in a few seconds; this page reloads by itself.</p>\
+         <script>setTimeout(function(){{location.reload()}},4000)</script>"
+    )
+}
+
+/// With both web servers enabled, the sites the other server serves (on its own ports).
+/// Each server answers their domains with a redirect, so an address without the port
+/// (an old bookmark, or one from before the site moved) still arrives, with its own
+/// certificate instead of another site's.
+fn elsewhere<'a>(settings: &Settings, sites: &'a [Site], server: Server) -> Vec<&'a Site> {
+    if settings.web_server != crate::config::WebServer::Both {
+        return Vec::new();
+    }
+    sites.iter().filter(|s| s.server != server && s.tool.is_none()).collect()
 }
 
 fn slash(p: &Path) -> String {
@@ -365,9 +473,9 @@ pub fn apache_php_handler(plan: Option<&PoolPlan>, indent: &str) -> String {
 
 /// Apache virtual hosts for the sites it serves. Pure, so it can be compared with what is
 /// on disk to tell whether Apache needs a restart.
-fn render_apache(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[PoolPlan]) -> String {
+fn render_apache(settings: &Settings, layout: &Layout, all: &[Site], plan: &[PoolPlan]) -> String {
     let (http, https) = settings.server_ports(Server::Apache);
-    let sites: Vec<&Site> = sites.iter().filter(|s| s.server == Server::Apache).collect();
+    let sites: Vec<&Site> = all.iter().filter(|s| s.server == Server::Apache).collect();
     // Tools are also reachable as http://localhost/<tool>/.
     let aliases: String = sites
         .iter()
@@ -379,24 +487,49 @@ fn render_apache(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[P
         })
         .collect();
     let mut out = format!(
-        "# Generated by lampRabit from the folders in www/. Regenerated on every Apache start.\n\n\
+        "# Generated by LampRabit from the folders in www/. Regenerated on every Apache start.\n\n\
          <VirtualHost *:{http}>\n    ServerName localhost\n    DocumentRoot \"{}\"\n{aliases}</VirtualHost>\n",
         slash(&layout.www())
     );
 
-    if sites.iter().any(|s| s.ssl) {
+    let moved = elsewhere(settings, all, Server::Apache);
+    if sites.iter().chain(moved.iter()).any(|s| s.ssl) {
         out.push_str(&format!(
             "\nLoadModule ssl_module modules/mod_ssl.so\nListen {https}\nSSLSessionCache \"shmcb:{}/ssl_scache(512000)\"\nSSLProtocol all -SSLv3 -TLSv1 -TLSv1.1\n",
             slash(&layout.tmp())
         ));
+        // The first HTTPS host answers names nothing else claims; without this one, that
+        // would be whichever project comes first, under its certificate.
+        let (crt, key) = ssl::site_cert_paths(layout, "localhost");
+        out.push_str(&format!(
+            "<VirtualHost *:{https}>\n    ServerName localhost\n    DocumentRoot \"{}\"\n{aliases}    SSLEngine on\n    SSLCertificateFile \"{}\"\n    SSLCertificateKeyFile \"{}\"\n</VirtualHost>\n",
+            slash(&layout.www()),
+            slash(&crt),
+            slash(&key),
+        ));
+    }
+    for site in &moved {
+        let body = format!("    ServerName {domain}\n    ServerAlias *.{domain}\n    Redirect 302 / {url}\n", domain = site.domain, url = site.url);
+        out.push_str(&format!("\n# {} (served by Nginx)\n<VirtualHost *:{http}>\n{body}</VirtualHost>\n", site.name));
+        if site.ssl {
+            let (crt, key) = ssl::site_cert_paths(layout, &site.domain);
+            out.push_str(&format!(
+                "<VirtualHost *:{https}>\n{body}    SSLEngine on\n    SSLCertificateFile \"{}\"\n    SSLCertificateKeyFile \"{}\"\n</VirtualHost>\n",
+                slash(&crt),
+                slash(&key),
+            ));
+        }
     }
 
     for site in sites {
         let body = match &site.proxy {
             // `upgrade` lets the proxied app use WebSockets (Mailpit's live inbox).
             Some(target) => format!(
-                "    ServerName {domain}\n    ProxyPreserveHost On\n    ProxyPass / {target} upgrade=websocket\n    ProxyPassReverse / {target}\n",
+                "    ServerName {domain}\n    ProxyPreserveHost {keep}\n    ProxyPass / {target} upgrade=websocket\n    ProxyPassReverse / {target}\n{stopped}",
                 domain = site.domain,
+                keep = if site.proxy_keep_host { "On" } else { "Off" },
+                // mod_proxy answers 503 when the app isn't listening.
+                stopped = if site.tool.is_none() { format!("    ErrorDocument 503 \"{}\"\n", stopped_page(&site.domain)) } else { String::new() },
             ),
             None => format!(
                 "    ServerName {domain}\n    ServerAlias *.{domain}\n    DocumentRoot \"{root}\"\n    <Directory \"{root}\">\n        Options Indexes FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n{handler}",
@@ -421,12 +554,13 @@ fn render_apache(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[P
 /// Nginx's whole config. Unlike Apache it doesn't read .htaccess, so PHP sites get the
 /// usual front-controller fallback (`try_files ... /index.php`), which suits Laravel,
 /// Symfony and WordPress.
-fn render_nginx(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[PoolPlan]) -> String {
+fn render_nginx(settings: &Settings, layout: &Layout, all: &[Site], plan: &[PoolPlan]) -> String {
     let (http, https) = settings.server_ports(Server::Nginx);
     let home = settings.versions.nginx.as_ref().map(|v| slash(&layout.bin("nginx", v))).unwrap_or_default();
     let logs = slash(&layout.logs());
     let fastcgi_params = format!("{home}/conf/fastcgi_params");
-    let sites: Vec<&Site> = sites.iter().filter(|s| s.server == Server::Nginx).collect();
+    let sites: Vec<&Site> = all.iter().filter(|s| s.server == Server::Nginx).collect();
+    let moved = elsewhere(settings, all, Server::Nginx);
 
     let upstreams: String = plan
         .iter()
@@ -465,11 +599,31 @@ fn render_nginx(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[Po
         })
         .collect();
 
+    // localhost also takes HTTPS names nothing else claims, rather than the first project.
+    let default_tls = if sites.iter().chain(moved.iter()).any(|s| s.ssl) {
+        let (crt, key) = ssl::site_cert_paths(layout, "localhost");
+        format!("        listen {https} ssl default_server;\n        ssl_certificate \"{}\";\n        ssl_certificate_key \"{}\";\n", slash(&crt), slash(&key))
+    } else {
+        String::new()
+    };
     let mut servers = format!(
-        "    server {{\n        listen {http} default_server;\n        server_name localhost;\n        root \"{www}\";\n        index index.php index.html index.htm;\n        autoindex on;\n{aliases}{php}    }}\n",
+        "    server {{\n        listen {http} default_server;\n{default_tls}        server_name localhost;\n        root \"{www}\";\n        index index.php index.html index.htm;\n        autoindex on;\n{aliases}{php}    }}\n",
         www = ngx_path(&layout.www()),
         php = php_location(default_pool, "$document_root$fastcgi_script_name"),
     );
+    for site in &moved {
+        let mut listen = format!("        listen {http};\n");
+        if site.ssl {
+            let (crt, key) = ssl::site_cert_paths(layout, &site.domain);
+            listen.push_str(&format!("        listen {https} ssl;\n        ssl_certificate \"{}\";\n        ssl_certificate_key \"{}\";\n", slash(&crt), slash(&key)));
+        }
+        servers.push_str(&format!(
+            "\n    # {name} (served by Apache)\n    server {{\n{listen}        server_name {domain} *.{domain};\n        return 302 {url}$request_uri;\n    }}\n",
+            name = site.name,
+            domain = site.domain,
+            url = site.url.trim_end_matches('/'),
+        ));
+    }
     for site in sites {
         let mut listen = format!("        listen {http};\n");
         if site.ssl {
@@ -482,7 +636,17 @@ fn render_nginx(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[Po
         }
         let body = match &site.proxy {
             Some(target) => format!(
-                "        location / {{\n            proxy_pass {target};\n            proxy_http_version 1.1;\n            proxy_set_header Host $host;\n            proxy_set_header Upgrade $http_upgrade;\n            proxy_set_header Connection $connection_upgrade;\n        }}\n"
+                "        location / {{\n            proxy_pass {target};\n            proxy_http_version 1.1;\n            proxy_set_header Host {host};\n            proxy_set_header X-Forwarded-Host $host;\n            proxy_set_header X-Forwarded-Proto $scheme;\n            proxy_set_header Upgrade $http_upgrade;\n            proxy_set_header Connection $connection_upgrade;\n        }}\n{stopped}",
+                host = if site.proxy_keep_host { "$host" } else { "$proxy_host" },
+                // Nginx answers 502 when the app isn't listening; the code stays 502.
+                stopped = if site.tool.is_none() {
+                    format!(
+                        "        error_page 502 504 /__lamprabit_stopped;\n        location = /__lamprabit_stopped {{\n            internal;\n            default_type text/html;\n            return 200 '{}';\n        }}\n",
+                        stopped_page(&site.domain)
+                    )
+                } else {
+                    String::new()
+                },
             ),
             None => format!(
                 "        root \"{root}\";\n        index index.php index.html index.htm;\n        location / {{\n            try_files $uri $uri/ /index.php?$query_string;\n        }}\n        location ~ /\\.ht {{ deny all; }}\n{php}",
@@ -498,7 +662,7 @@ fn render_nginx(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[Po
     }
 
     format!(
-        r#"# Generated by lampRabit. Changes are overwritten on every start.
+        r#"# Generated by LampRabit. Changes are overwritten on every start.
 worker_processes 1;
 error_log "{logs}/nginx-error.log" warn;
 pid "{pid}";
@@ -510,7 +674,7 @@ events {{
 http {{
     include "{home}/conf/mime.types";
     default_type application/octet-stream;
-    # lampRabit's own health checks would otherwise add a line every few seconds.
+    # LampRabit's own health checks would otherwise add a line every few seconds.
     map $http_user_agent $lamprabit_log {{
         ~^lampRabit/ 0;
         default 1;
@@ -540,10 +704,12 @@ http {{
 /// Returns true when a new local CA had to be created.
 pub fn write_config(settings: &Settings, layout: &Layout, sites: &[Site], plan: &[PoolPlan], server: Server) -> Result<bool> {
     let mut created_ca = false;
-    let ssl_sites: Vec<&Site> = sites.iter().filter(|s| s.ssl && s.server == server).collect();
+    let moved = elsewhere(settings, sites, server);
+    let ssl_sites: Vec<&Site> = sites.iter().filter(|s| s.ssl && s.server == server).chain(moved.into_iter().filter(|s| s.ssl)).collect();
     if !ssl_sites.is_empty() {
         let (ca, created) = ssl::ensure_ca(layout)?;
         created_ca = created;
+        ssl::ensure_site_cert(layout, &ca, "localhost")?;
         for site in ssl_sites {
             ssl::ensure_site_cert(layout, &ca, &site.domain)?;
         }
@@ -577,7 +743,7 @@ pub fn hosts_file() -> PathBuf {
     }
 }
 
-/// Domains currently in lampRabit's block of the hosts file.
+/// Domains currently in LampRabit's block of the hosts file.
 fn managed_domains(hosts: &str) -> BTreeSet<String> {
     let mut inside = false;
     let mut domains = BTreeSet::new();
@@ -594,12 +760,12 @@ fn managed_domains(hosts: &str) -> BTreeSet<String> {
     domains
 }
 
-/// Whether the hosts file has lampRabit's block (so removing it is worth a prompt).
+/// Whether the hosts file has LampRabit's block (so removing it is worth a prompt).
 pub fn hosts_has_block() -> bool {
     std::fs::read(hosts_file()).is_ok_and(|h| String::from_utf8_lossy(&h).lines().any(|l| l.trim() == HOSTS_BEGIN))
 }
 
-/// The hosts file without lampRabit's block, everything else byte for byte.
+/// The hosts file without LampRabit's block, everything else byte for byte.
 pub fn hosts_without_block(current: &[u8]) -> Vec<u8> {
     render_hosts(current, &[])
 }
@@ -609,7 +775,7 @@ pub fn hosts_in_sync(sites: &[Site]) -> bool {
     std::fs::read(hosts_file()).is_ok_and(|h| managed_domains(&String::from_utf8_lossy(&h)) == wanted)
 }
 
-/// The new hosts file: every byte outside lampRabit's block is kept as it was (the file
+/// The new hosts file: every byte outside LampRabit's block is kept as it was (the file
 /// may not be UTF-8, and other tools' entries must survive untouched).
 fn render_hosts(current: &[u8], sites: &[Site]) -> Vec<u8> {
     let nl: &[u8] = if cfg!(windows) { b"\r\n" } else { b"\n" };
@@ -647,7 +813,7 @@ fn render_hosts(current: &[u8], sites: &[Site]) -> Vec<u8> {
     out
 }
 
-/// Rewrites lampRabit's block of the hosts file. This needs administrator rights, so the
+/// Rewrites LampRabit's block of the hosts file. This needs administrator rights, so the
 /// OS shows its elevation prompt; only the managed block changes, and a copy of the
 /// previous file is kept in tmp/.
 pub async fn update_hosts(layout: &Layout, sites: &[Site]) -> Result<()> {
@@ -706,7 +872,7 @@ pub async fn update_hosts(layout: &Layout, sites: &[Site]) -> Result<()> {
         _ => Err(Error::msg(match reason {
             // Windows Defender and other antivirus tools sometimes lock the hosts file.
             Some(r) => format!(
-                "Could not update {}: {r} If security software protects the hosts file, allow lampRabit or add the entries by hand.",
+                "Could not update {}: {r} If security software protects the hosts file, allow LampRabit or add the entries by hand.",
                 hosts.display()
             ),
             None => format!("Could not update {}.", hosts.display()),
@@ -744,6 +910,14 @@ mod tests {
             modified: 0,
             tool: None,
             proxy: None,
+            proxy_keep_host: false,
+            app: None,
+            node_project: false,
+            language: Language::Static,
+            serve_mode: ServeMode::Static,
+            route: None,
+            ports: Vec::new(),
+            route_port: None,
             php: None,
             server: Server::Apache,
             node: None,
@@ -785,6 +959,45 @@ mod tests {
         assert_eq!(label("price$tag").as_deref(), Some("price-tag"));
         assert_eq!(label("日本語"), None);
         assert_eq!(label(&"a".repeat(64)), None);
+    }
+
+    #[test]
+    fn sites_on_the_other_server_redirect_and_unknown_names_reach_localhost() {
+        let mut settings = Settings::default();
+        settings.web_server = crate::config::WebServer::Both;
+        let layout = Layout::new(PathBuf::from("/lr"));
+        let mut wp = site("blog.test");
+        wp.ssl = true;
+        let mut app = site("app.test");
+        app.ssl = true;
+        app.server = Server::Nginx;
+        app.url = "https://app.test:8443/".into();
+        let sites = [wp, app];
+
+        let apache = render(&settings, &layout, &sites, &[], Server::Apache);
+        assert_eq!(apache.matches("ServerName localhost").count(), 2, "localhost answers on both ports");
+        let tls_default = apache.find("SSLEngine on").unwrap();
+        assert!(apache[..tls_default].contains("ServerName localhost"), "the first HTTPS host is localhost, not a project");
+        assert!(apache.contains("ServerName app.test
+    ServerAlias *.app.test
+    Redirect 302 / https://app.test:8443/"));
+        let (crt, _) = ssl::site_cert_paths(&layout, "app.test");
+        assert!(apache.contains(&slash(&crt)), "the redirect uses the site's own certificate");
+
+        let nginx = render(&settings, &layout, &sites, &[], Server::Nginx);
+        assert!(nginx.contains("ssl default_server"));
+        assert!(nginx.contains("server_name blog.test *.blog.test;
+        return 302"));
+
+        // With one web server there's nothing to redirect.
+        settings.web_server = crate::config::WebServer::Apache;
+        assert!(!render(&settings, &layout, &sites[..1], &[], Server::Apache).contains("Redirect 302"));
+    }
+
+    #[test]
+    fn stopped_page_fits_inside_both_servers_quotes() {
+        let page = stopped_page("shop.test");
+        assert!(!page.contains('\'') && !page.contains('"'), "Nginx quotes it with ' and Apache with \"");
     }
 
     #[test]

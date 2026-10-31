@@ -1,6 +1,6 @@
-# Installing lampRabit
+# Installing LampRabit
 
-> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows and Linux are fully supported; macOS is in preview (lampRabit's macOS builds of Apache, Nginx and PHP are new, and MariaDB and MySQL can't be downloaded there yet; see the table below).
+> **Status:** installers for every platform are on the GitHub Releases page: https://github.com/Shivam-SV/LampRabit/releases/latest. Windows and Linux are fully supported; macOS is in preview (LampRabit's macOS builds of Apache, Nginx and PHP are new, and MariaDB and MySQL can't be downloaded there yet; see the table below).
 
 ## System requirements
 
@@ -15,36 +15,36 @@
 
 | Runtime | Windows | macOS | Linux |
 |---|---|---|---|
-| Apache | Yes | Preview (lampRabit's builds) | Yes (lampRabit's builds) |
-| Nginx | Yes | Preview (lampRabit's builds) | Yes (lampRabit's builds) |
-| PHP | Yes (8.1–8.5) | Preview (8.1–8.5, lampRabit's static builds) | Yes (8.1–8.5, lampRabit's static builds) |
+| Apache | Yes | Preview (LampRabit's builds) | Yes (LampRabit's builds) |
+| Nginx | Yes | Preview (LampRabit's builds) | Yes (LampRabit's builds) |
+| PHP | Yes (8.1–8.5) | Preview (8.1–8.5, LampRabit's static builds) | Yes (8.1–8.5, LampRabit's static builds) |
 | MariaDB | Yes | Coming soon | Yes |
-| MySQL | Yes | Coming soon | Yes (needs the system's libaio and libnuma; lampRabit names the packages if they're missing) |
+| MySQL | Yes | Coming soon | Yes (needs the system's libaio and libnuma; LampRabit names the packages if they're missing) |
 | Composer | Yes | Yes | Yes |
-| Redis (with redis-cli) | Yes (community redis-windows build) | Yes (lampRabit's builds) | Yes (lampRabit's builds) |
-| Memcached | Yes (nono303's build) | Preview (lampRabit's builds) | Yes (lampRabit's builds) |
+| Redis (with redis-cli) | Yes (community redis-windows build) | Yes (LampRabit's builds) | Yes (LampRabit's builds) |
+| Memcached | Yes (nono303's build) | Preview (LampRabit's builds) | Yes (LampRabit's builds) |
 | Mailpit, phpMyAdmin, Adminer | Yes | Yes | Yes |
 
 ## Install
 
 ### Windows
-1. Download `lampRabit_<version>_x64-setup.exe` (or the `.msi` for managed installs) from the Releases page.
-2. Run it. lampRabit installs per user; administrator rights aren't required for the app itself.
+1. Download `LampRabit_<version>_x64-setup.exe` (or the `.msi` for managed installs) from the Releases page.
+2. Run it. LampRabit installs per user; administrator rights aren't required for the app itself.
 3. **"Windows protected your PC"** appears because the installer isn't code-signed yet. Click **More info**, then **Run anyway**.
-4. Apache and PHP need the Microsoft Visual C++ 2015–2022 Redistributable (x64). lampRabit checks for it and shows an **Install** button on the Overview page if it's missing.
+4. Apache and PHP need the Microsoft Visual C++ 2015–2022 Redistributable (x64). LampRabit checks for it and shows an **Install** button on the Overview page if it's missing.
 
 ### macOS
-1. Download `lampRabit_<version>_aarch64.dmg` (Apple Silicon: M1 and later) or `lampRabit_<version>_x64.dmg` (Intel).
-2. Open it and drag lampRabit to Applications.
-3. Open lampRabit. Because it isn't signed yet, macOS says it can't be opened: go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**, then confirm. (Or right-click the app in Applications and choose **Open**.) You only need to do this once.
+1. Download `LampRabit_<version>_aarch64.dmg` (Apple Silicon: M1 and later) or `LampRabit_<version>_x64.dmg` (Intel).
+2. Open it and drag LampRabit to Applications.
+3. Open LampRabit. Because it isn't signed yet, macOS says it can't be opened: go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**, then confirm. (Or right-click the app in Applications and choose **Open**.) You only need to do this once.
 
 ### Linux
-- **AppImage:** download `lampRabit_<version>_amd64.AppImage`, make it executable (`chmod +x lampRabit_*.AppImage`) and run it.
+- **AppImage:** download `LampRabit_<version>_amd64.AppImage`, make it executable (`chmod +x LampRabit_*.AppImage`) and run it.
 - **Debian/Ubuntu:** `sudo apt install ./lampRabit_<version>_amd64.deb`
 
 ## First run
 
-1. **Environment folder.** lampRabit keeps everything in one folder: `C:\lampRabit` on Windows, `~/lampRabit` on macOS and Linux. You can change it in Settings → General. Inside it:
+1. **Environment folder.** LampRabit keeps everything in one folder: `C:\lampRabit` on Windows, `~/lampRabit` on macOS and Linux. You can change it in Settings → General. Inside it:
 
    ```
    bin/    downloaded runtimes (Apache, PHP, MariaDB, ...)
@@ -74,11 +74,11 @@
 
 ## Firefox and HTTPS
 
-Firefox keeps its own certificate list. To make it trust lampRabit's certificates, open `about:config`, set `security.enterprise_roots.enabled` to `true`, and restart Firefox. Chrome, Edge, Brave and Safari use the system certificate store and work after **Trust certificate**.
+Firefox keeps its own certificate list. To make it trust LampRabit's certificates, open `about:config`, set `security.enterprise_roots.enabled` to `true`, and restart Firefox. Chrome, Edge, Brave and Safari use the system certificate store and work after **Trust certificate**.
 
-On Linux, **Trust certificate** asks for your password once and adds the certificate to the system store. Chrome, Chromium and Firefox keep their own lists, which lampRabit updates too when `certutil` is installed (`sudo apt install libnss3-tools`, or `nss-tools` on Fedora).
+On Linux, **Trust certificate** asks for your password once and adds the certificate to the system store. Chrome, Chromium and Firefox keep their own lists, which LampRabit updates too when `certutil` is installed (`sudo apt install libnss3-tools`, or `nss-tools` on Fedora).
 
-On Linux, normal users can't listen on ports below 1024. The first time Apache or Nginx starts on port 80/443, lampRabit asks for your password once and saves the change in `/etc/sysctl.d/50-lamprabit.conf`. To avoid it, use ports above 1024 (such as 8080 and 8443) in Settings → Ports.
+On Linux, normal users can't listen on ports below 1024. The first time Apache or Nginx starts on port 80/443, LampRabit asks for your password once and saves the change in `/etc/sysctl.d/50-lamprabit.conf`. To avoid it, use ports above 1024 (such as 8080 and 8443) in Settings → Ports.
 
 ## Ports used
 
@@ -92,15 +92,15 @@ On Linux, normal users can't listen on ports below 1024. The first time Apache o
 
 ## Uninstall
 
-Uninstalling removes everything lampRabit set up and **keeps your projects (`www/`) and databases (`data/`)**, so a later install picks them up again. It deletes the runtimes, configs, logs and certificates in the environment folder (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`; nothing else in that folder is touched), lampRabit's settings, the `.test` entries in the hosts file, the trusted "lampRabit Local CA" certificate, lampRabit's commands on your PATH, the saved ngrok token and starting with your computer.
+Uninstalling removes everything LampRabit set up and **keeps your projects (`www/`) and databases (`data/`)**, so a later install picks them up again. It deletes the runtimes, configs, logs and certificates in the environment folder (`bin`, `etc`, `logs`, `tmp`, `ssl`, `shims`; nothing else in that folder is touched), LampRabit's settings, the `.test` entries in the hosts file, the trusted "lampRabit Local CA" certificate, LampRabit's commands on your PATH, the saved ngrok token and starting with your computer.
 
-- **Windows:** Settings → Apps → lampRabit → Uninstall. The uninstaller asks you to close lampRabit, then does the cleanup; Windows asks for confirmation for the hosts file and the certificate. (Updating lampRabit never runs this.)
-- **macOS and Linux:** in lampRabit, open Settings → Troubleshooting → **Remove lampRabit from this computer**. It shows what is deleted and kept before doing anything, then quits. Afterwards move lampRabit to the Trash (macOS), or delete the AppImage / run `sudo apt remove lamprabit` (Linux). On Linux your password is asked once, for the hosts file, the certificate and the ports 80/443 setting.
+- **Windows:** Settings → Apps → LampRabit → Uninstall. The uninstaller asks you to close LampRabit, then does the cleanup; Windows asks for confirmation for the hosts file and the certificate. (Updating LampRabit never runs this.)
+- **macOS and Linux:** in LampRabit, open Settings → Troubleshooting → **Remove LampRabit from this computer**. It shows what is deleted and kept before doing anything, then quits. Afterwards move LampRabit to the Trash (macOS), or delete the AppImage / run `sudo apt remove lamprabit` (Linux). On Linux your password is asked once, for the hosts file, the certificate and the ports 80/443 setting.
 - The same Settings action works on Windows too, if you'd rather clean up before uninstalling.
 
 To delete your projects and databases as well, delete the environment folder (`C:\lampRabit` or `~/lampRabit`) afterwards. Back up `www/` and `data/` first if you might need them.
 
-If something couldn't be undone (for example a cancelled administrator prompt), lampRabit lists it with what to do by hand.
+If something couldn't be undone (for example a cancelled administrator prompt), LampRabit lists it with what to do by hand.
 
 ## Building from source
 

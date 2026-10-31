@@ -1,0 +1,52 @@
+schema: 1
+id: astro
+name: Astro
+description: Astro for content sites and islands, with the integrations you pick.
+icon: zap
+color: orange
+duration: npm · under a minute
+requires:
+  node: true
+# create-astro's own questions (create-astro --help).
+variables:
+  - id: starter
+    label: Starter
+    type: choice
+    default: minimal
+    options:
+      - { value: minimal, label: Minimal }
+      - { value: basics, label: Basics (a starter page and layout) }
+      - { value: blog, label: Blog }
+      - { value: portfolio, label: Portfolio }
+      - { value: starlight, label: Documentation site (Starlight) }
+  - id: integrations
+    label: Integrations
+    type: multi
+    separator: ","
+    flag: "--add {value}"
+    options:
+      - { value: react, label: React }
+      - { value: vue, label: Vue }
+      - { value: svelte, label: Svelte }
+      - { value: solid, label: Solid }
+      - { value: preact, label: Preact }
+      - { value: tailwind, label: Tailwind CSS }
+      - { value: mdx, label: MDX }
+      - { value: sitemap, label: Sitemap }
+steps:
+  - name: Creating the project with create-astro
+    cwd: www
+    run: '{{pm.create}} astro@latest "{{project}}" {{pm.args}} --template {{vars.starter}} {{vars.integrations}} --install --no-git --yes'
+  - id: git
+    optional: true
+    default: false
+    label: Initialise a Git repository
+    needs: [git]
+    git_init:
+      commit: New Astro project
+commands:
+  discover: [package.json]
+serve:
+  mode: dynamic
+  command: "{{pm.run}} dev {{pm.args}} --host 127.0.0.1 --port {port}"
+done: Start it from the Sites page; it's served at {{url}}.

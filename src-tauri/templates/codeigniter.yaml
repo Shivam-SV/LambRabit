@@ -43,3 +43,8 @@ steps:
     needs: [git]
     git_init:
       commit: New CodeIgniter project
+commands:
+  discover: [spark, composer.json]
+  list:
+    - name: Run the migrations
+      run: php spark migrate

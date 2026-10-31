@@ -29,6 +29,8 @@ export function Button({
       {...props}
       className={clsx(
         "motion-press inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50",
+        // A disabled secondary button otherwise looks almost the same as an enabled one in dark mode.
+        variant === "secondary" && "disabled:border-transparent disabled:bg-transparent disabled:text-muted disabled:shadow-none",
         sizes[size],
         variants[variant],
         className,

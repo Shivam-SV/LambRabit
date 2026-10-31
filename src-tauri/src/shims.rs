@@ -1,5 +1,5 @@
 //! Command shims in `<root>/shims` (php, composer, mariadb, mysql…) that always run the
-//! active versions with lampRabit's config, and optionally that folder on the user's PATH
+//! active versions with LampRabit's config, and optionally that folder on the user's PATH
 //! so they work from any terminal.
 
 use std::path::{Path, PathBuf};
@@ -50,12 +50,12 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             shim(&dir, "composer", &php_cases)?;
         }
     }
-    // The tools read host, port and user from client.cnf, so they reach lampRabit's
+    // The tools read host, port and user from client.cnf, so they reach LampRabit's
     // server as root without any options.
     let db_tool = |db: Database, program: &str| -> Option<Case> {
         let target = configs::database_home(settings, layout, db).ok()?.join("bin").join(exe(program));
         let cnf = configs::write_client_config(settings, layout, db).ok()?;
-        target.exists().then(|| Case { folder: None, target, args: vec![format!("--defaults-extra-file={}", path(&cnf))] })
+        target.exists().then(|| Case { folder: None, target, args: vec![format!("--defaults-extra-file={}", path(&cnf))], env: Vec::new() })
     };
     for name in MARIADB_TOOLS {
         if let Some(case) = db_tool(Database::Mariadb, name) {
@@ -69,11 +69,11 @@ pub fn write(settings: &Settings, layout: &Layout) -> Result<PathBuf> {
             }
         }
     }
-    // redis-cli from the active Redis, pointed at lampRabit's port.
+    // redis-cli from the active Redis, pointed at LampRabit's port.
     let cli = settings.versions.redis.as_ref().map(|v| layout.bin("redis", v).join(exe("redis-cli")));
     if let Some(target) = cli.filter(|t| t.exists()) {
         let args = vec!["-p".to_string(), settings.ports.redis.to_string()];
-        shim(&dir, "redis-cli", &[Case { folder: None, target, args }])?;
+        shim(&dir, "redis-cli", &[Case { folder: None, target, args, env: Vec::new() }])?;
     }
     Ok(dir)
 }
@@ -87,6 +87,8 @@ struct Case {
     folder: Option<PathBuf>,
     target: PathBuf,
     args: Vec<String>,
+    /// Environment set before it runs, which programs it starts inherit.
+    env: Vec<(String, String)>,
 }
 
 fn php_case(settings: &Settings, layout: &Layout, version: &str, folder: Option<PathBuf>) -> Option<Case> {
@@ -94,11 +96,14 @@ fn php_case(settings: &Settings, layout: &Layout, version: &str, folder: Option<
     if !target.exists() {
         return None;
     }
-    let args = match configs::write_php(settings, layout, version, settings.ports.php_fpm) {
-        Ok(ini) => vec!["-c".to_string(), path(&ini)],
-        Err(_) => Vec::new(),
+    // PHPRC as well as -c: PHP that a script starts by itself (`php artisan serve` runs
+    // `php -S`, Composer runs scripts) gets no -c, and without LampRabit's php.ini it has no
+    // extensions (pdo_mysql: "could not find driver").
+    let (args, env) = match configs::write_php(settings, layout, version, settings.ports.php_fpm) {
+        Ok(ini) => (vec!["-c".to_string(), path(&ini)], ini.parent().map(|d| vec![("PHPRC".to_string(), path(d))]).unwrap_or_default()),
+        Err(_) => (Vec::new(), Vec::new()),
     };
-    Some(Case { folder, target, args })
+    Some(Case { folder, target, args, env })
 }
 
 /// Writes a shim that picks the first case whose folder contains the working directory;
@@ -108,7 +113,8 @@ fn shim(dir: &Path, name: &str, cases: &[Case]) -> Result<()> {
     if cfg!(windows) {
         let run = |c: &Case| {
             let args: String = c.args.iter().map(|a| format!(" \"{a}\"")).collect();
-            format!("\"{}\"{args} %*\r\nexit /b %ERRORLEVEL%\r\n", c.target.display())
+            let env: String = c.env.iter().map(|(k, v)| format!("set \"{k}={v}\"\r\n")).collect();
+            format!("{env}\"{}\"{args} %*\r\nexit /b %ERRORLEVEL%\r\n", c.target.display())
         };
         let mut script = String::from("@echo off\r\nsetlocal\r\nset \"LR_HERE=%CD%\\\"\r\n");
         let mut labels = String::new();
@@ -130,7 +136,9 @@ fn shim(dir: &Path, name: &str, cases: &[Case]) -> Result<()> {
         let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
         let run = |c: &Case| {
             let args: String = c.args.iter().map(|a| format!(" {}", quote(a))).collect();
-            format!("exec {}{args} \"$@\"", quote(&c.target.to_string_lossy()))
+            let env: String = c.env.iter().map(|(k, v)| format!("{k}={} ", quote(v))).collect();
+            let export = if env.is_empty() { String::new() } else { format!("export {}; ", env.trim_end()) };
+            format!("{export}exec {}{args} \"$@\"", quote(&c.target.to_string_lossy()))
         };
         let mut script = String::from("#!/bin/sh\ncase \"$PWD/\" in\n");
         for case in cases {
@@ -219,8 +227,8 @@ mod windows_path {
 mod profile {
     use super::*;
 
-    const START: &str = "# >>> lampRabit >>>";
-    const END: &str = "# <<< lampRabit <<<";
+    const START: &str = "# >>> LampRabit >>>";
+    const END: &str = "# <<< LampRabit <<<";
 
     /// A managed block in the shell start-up files. zsh is macOS's default shell, so
     /// .zshrc is created there if missing; elsewhere only existing files are touched,
